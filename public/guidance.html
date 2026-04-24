@@ -1,0 +1,260 @@
+# Yoga + Diet Guidance Page
+
+## 1. Create `public/guidance.html`
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Wellness Guidance</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: white;
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .phase-card {
+      max-width: 900px;
+      margin: auto;
+      background: #1f1f1f;
+      border-radius: 15px;
+      padding: 25px;
+      box-shadow: 0 0 15px rgba(0,0,0,0.4);
+    }
+
+    .phase-title {
+      font-size: 28px;
+      margin-bottom: 10px;
+    }
+
+    .phase-description {
+      opacity: 0.8;
+      margin-bottom: 25px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+    }
+
+    .section {
+      background: #2a2a2a;
+      padding: 20px;
+      border-radius: 12px;
+    }
+
+    .section h2 {
+      margin-top: 0;
+    }
+
+    ul {
+      padding-left: 20px;
+    }
+
+    li {
+      margin-bottom: 10px;
+    }
+
+    .Menstruation {
+      border-left: 6px solid #ff7675;
+    }
+
+    .Follicular {
+      border-left: 6px solid #74b9ff;
+    }
+
+    .Ovulation {
+      border-left: 6px solid #55efc4;
+      color: white;
+    }
+
+    .Luteal {
+      border-left: 6px solid #ffeaa7;
+    }
+
+    .back-btn {
+      display: inline-block;
+      margin-bottom: 20px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      background: #6c5ce7;
+      color: white;
+      text-decoration: none;
+    }
+
+    .back-btn:hover {
+      background: #8b7dff;
+    }
+  </style>
+</head>
+<body>
+
+<a href="/dashboard.html" class="back-btn">← Back to Dashboard</a>
+
+<h1>Personal Wellness Guidance</h1>
+
+<div id="guidanceContainer"></div>
+
+<script>
+const guidanceData = {
+  Menstruation: {
+    description: "Focus on rest, recovery, hydration, and reducing cramps.",
+    diet: [
+      "Iron-rich foods like spinach and lentils",
+      "Warm soups and herbal teas",
+      "Drink plenty of water",
+      "Avoid excessive caffeine and junk food"
+    ],
+    yoga: [
+      "Child's Pose",
+      "Cat-Cow Stretch",
+      "Supine Twist",
+      "Deep breathing exercises"
+    ],
+    exercise: [
+      "Light walking",
+      "Gentle stretching",
+      "Avoid heavy lifting",
+      "Low intensity movement only"
+    ]
+  },
+
+  Follicular: {
+    description: "Energy rises during this phase. Great time to build strength and productivity.",
+    diet: [
+      "Lean protein",
+      "Fresh fruits and vegetables",
+      "Fermented foods",
+      "Healthy carbohydrates"
+    ],
+    yoga: [
+      "Sun Salutations",
+      "Warrior Poses",
+      "Standing yoga flows",
+      "Dynamic stretches"
+    ],
+    exercise: [
+      "Cardio workouts",
+      "Strength training",
+      "Jogging",
+      "Cycling"
+    ]
+  },
+
+  Ovulation: {
+    description: "Peak energy and performance phase.",
+    diet: [
+      "Antioxidant-rich fruits",
+      "Healthy fats",
+      "Protein-rich meals",
+      "Light fresh foods"
+    ],
+    yoga: [
+      "Power Yoga",
+      "Balance poses",
+      "Core strengthening",
+      "Mobility work"
+    ],
+    exercise: [
+      "HIIT",
+      "Heavy strength training",
+      "Running",
+      "Athletic workouts"
+    ]
+  },
+
+  Luteal: {
+    description: "Focus on stress management and balanced energy.",
+    diet: [
+      "Magnesium-rich foods",
+      "Complex carbohydrates",
+      "Bananas and nuts",
+      "Reduce sugar intake"
+    ],
+    yoga: [
+      "Slow yoga",
+      "Meditation",
+      "Hip-opening stretches",
+      "Relaxation poses"
+    ],
+    exercise: [
+      "Moderate workouts",
+      "Pilates",
+      "Walking",
+      "Lower workout intensity gradually"
+    ]
+  }
+};
+
+async function loadGuidance() {
+  const token = localStorage.getItem("token");
+
+  if (!token) {
+    window.location.href = "/login";
+    return;
+  }
+
+  const res = await fetch("/dashboard", {
+    headers: {
+      "Authorization": "Bearer " + token
+    }
+  });
+
+  const data = await res.json();
+
+  const today = new Date().toISOString().split("T")[0];
+
+  const todayData = data.cycle.find(day => day.date === today);
+
+  if (!todayData) return;
+
+  const phase = todayData.phase;
+  const info = guidanceData[phase];
+
+  const container = document.getElementById("guidanceContainer");
+
+  container.innerHTML = `
+    <div class="phase-card ${phase}">
+      <div class="phase-title">${phase} Phase</div>
+      <div class="phase-description">${info.description}</div>
+
+      <div class="grid">
+        <div class="section">
+          <h2>🥗 Diet Guidance</h2>
+          <ul>
+            ${info.diet.map(item => `<li>${item}</li>`).join("")}
+          </ul>
+        </div>
+
+        <div class="section">
+          <h2>🧘 Yoga Guidance</h2>
+          <ul>
+            ${info.yoga.map(item => `<li>${item}</li>`).join("")}
+          </ul>
+        </div>
+
+        <div class="section">
+          <h2>🏃 Exercise Guidance</h2>
+          <ul>
+            ${info.exercise.map(item => `<li>${item}</li>`).join("")}
+          </ul>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+loadGuidance();
+</script>
+
+</body>
+</html>

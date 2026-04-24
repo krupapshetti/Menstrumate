@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+  <title>MenstruMate</title>
+
+  <style>
+
+    *{
+      margin:0;
+      padding:0;
+      box-sizing:border-box;
+      font-family: Arial, sans-serif;
+    }
+
+    body{
+
+      min-height:100vh;
+      overflow-x:hidden;
+
+      background:
+      radial-gradient(circle at top left,#ff8fc7 0%,transparent 25%),
+      radial-gradient(circle at bottom right,#7b61ff 0%,transparent 30%),
+      linear-gradient(
+        135deg,
+        #120018,
+        #240046,
+        #3c096c
+      );
+
+      color:white;
+    }
+
+    /* ===================== */
+    /* NAVBAR */
+    /* ===================== */
+
+    nav{
+
+      width:100%;
+
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+
+      padding:25px 60px;
+
+      position:fixed;
+      top:0;
+
+      backdrop-filter:blur(14px);
+
+      background:rgba(0,0,0,0.15);
+
+      z-index:1000;
+    }
+
+    .logo{
+
+      font-size:34px;
+      font-weight:900;
+
+      letter-spacing:1px;
+    }
+
+    .logo span{
+      color:#ff8fc7;
+    }
+
+    .nav-buttons{
+
+      display:flex;
+      gap:15px;
+    }
+
+    .nav-buttons button{
+
+      padding:12px 22px;
+
+      border:none;
+      border-radius:14px;
+
+      cursor:pointer;
+
+      transition:0.3s;
+
+      font-size:15px;
+    }
+
+    .login-btn{
+
+      background:transparent;
+      color:white;
+
+      border:1px solid rgba(255,255,255,0.3);
+    }
+
+    .login-btn:hover{
+
+      background:white;
+      color:#3c096c;
+    }
+
+    .signup-btn{
+
+      background:
+      linear-gradient(
+        135deg,
+        #ff4fa3,
+        #c9188d
+      );
+
+      color:white;
+      font-weight:bold;
+
+      box-shadow:
+      0 10px 30px rgba(255,79,163,0.4);
+    }
+
+    .signup-btn:hover{
+
+      transform:
+      translateY(-2px)
+      scale(1.03);
+    }
+
+    /* ===================== */
+    /* HERO */
+    /* ===================== */
+
+    .hero{
+
+      min-height:100vh;
+
+      display:flex;
+      justify-content:center;
+      align-items:center;
+
+      text-align:center;
+
+      padding:
+      140px 30px 60px;
+
+      position:relative;
+    }
+
+    .glow1,
+    .glow2{
+
+      position:absolute;
+
+      border-radius:50%;
+
+      filter:blur(100px);
+
+      animation:float 7s infinite ease-in-out;
+    }
+
+    .glow1{
+
+      width:350px;
+      height:350px;
+
+      background:#ff4fa355;
+
+      top:120px;
+      left:-100px;
+    }
+
+    .glow2{
+
+      width:400px;
+      height:400px;
+
+      background:#7b61ff55;
+
+      bottom:-50px;
+      right:-100px;
+    }
+
+    @keyframes float{
+
+      0%{
+        transform:translateY(0px);
+      }
+
+      50%{
+        transform:translateY(30px);
+      }
+
+      100%{
+        transform:translateY(0px);
+      }
+
+    }
+
+    .hero-content{
+
+      max-width:950px;
+      z-index:2;
+    }
+
+    .badge{
+
+      display:inline-block;
+
+      padding:10px 20px;
+
+      border-radius:999px;
+
+      background:rgba(255,255,255,0.08);
+
+      border:1px solid rgba(255,255,255,0.1);
+
+      backdrop-filter:blur(10px);
+
+      margin-bottom:25px;
+
+      font-size:14px;
+    }
+
+    h1{
+
+      font-size:85px;
+      line-height:1.05;
+
+      margin-bottom:20px;
+
+      font-weight:900;
+    }
+
+    .gradient{
+
+      background:
+      linear-gradient(
+        135deg,
+        #ffb3d9,
+        #ffffff
+      );
+
+      -webkit-background-clip:text;
+      -webkit-text-fill-color:transparent;
+    }
+
+    .subtitle{
+
+      font-size:28px;
+
+      color:#ffd6ec;
+
+      margin-bottom:30px;
+
+      letter-spacing:2px;
+    }
+
+    .hero p{
+
+      font-size:22px;
+      line-height:1.8;
+
+      opacity:0.9;
+
+      max-width:850px;
+
+      margin:auto auto 40px;
+    }
+
+    .hero-buttons{
+
+      display:flex;
+      justify-content:center;
+      gap:20px;
+
+      flex-wrap:wrap;
+    }
+
+    .hero-buttons button{
+
+      padding:18px 34px;
+
+      border:none;
+      border-radius:18px;
+
+      cursor:pointer;
+
+      transition:0.3s;
+
+      font-size:18px;
+    }
+
+    .primary-btn{
+
+      background:
+      linear-gradient(
+        135deg,
+        #ff4fa3,
+        #c9188d
+      );
+
+      color:white;
+
+      font-weight:bold;
+
+      box-shadow:
+      0 10px 30px rgba(255,79,163,0.4);
+    }
+
+    .primary-btn:hover{
+
+      transform:
+      translateY(-4px)
+      scale(1.03);
+    }
+
+    .secondary-btn{
+
+      background:rgba(255,255,255,0.08);
+
+      border:1px solid rgba(255,255,255,0.2);
+
+      backdrop-filter:blur(10px);
+
+      color:white;
+    }
+
+    .secondary-btn:hover{
+
+      background:rgba(255,255,255,0.15);
+    }
+
+    /* ===================== */
+    /* FEATURES */
+    /* ===================== */
+
+    .features{
+
+      padding:100px 40px;
+    }
+
+    .features h2{
+
+      text-align:center;
+
+      font-size:52px;
+
+      margin-bottom:60px;
+    }
+
+    .feature-grid{
+
+      max-width:1300px;
+      margin:auto;
+
+      display:grid;
+
+      grid-template-columns:
+      repeat(auto-fit,minmax(270px,1fr));
+
+      gap:30px;
+    }
+
+    .feature-card{
+
+      background:rgba(255,255,255,0.08);
+
+      border:1px solid rgba(255,255,255,0.1);
+
+      backdrop-filter:blur(14px);
+
+      padding:35px;
+
+      border-radius:28px;
+
+      transition:0.35s;
+    }
+
+    .feature-card:hover{
+
+      transform:translateY(-8px);
+
+      background:rgba(255,255,255,0.12);
+    }
+
+    .icon{
+
+      font-size:44px;
+      margin-bottom:20px;
+    }
+
+    .feature-card h3{
+
+      font-size:24px;
+      margin-bottom:15px;
+    }
+
+    .feature-card p{
+
+      line-height:1.8;
+      opacity:0.9;
+    }
+
+    /* ===================== */
+    /* CTA */
+    /* ===================== */
+
+    .cta{
+
+      padding:80px 30px 120px;
+    }
+
+    .cta-box{
+
+      max-width:950px;
+      margin:auto;
+
+      background:rgba(255,255,255,0.08);
+
+      border:1px solid rgba(255,255,255,0.1);
+
+      backdrop-filter:blur(16px);
+
+      border-radius:40px;
+
+      padding:70px 40px;
+
+      text-align:center;
+    }
+
+    .cta-box h2{
+
+      font-size:52px;
+      margin-bottom:20px;
+    }
+
+    .cta-box p{
+
+      font-size:20px;
+      line-height:1.8;
+
+      opacity:0.9;
+
+      margin-bottom:35px;
+    }
+
+    footer{
+
+      text-align:center;
+
+      padding:30px;
+
+      opacity:0.7;
+
+      font-size:14px;
+    }
+
+    /* ===================== */
+    /* MOBILE */
+    /* ===================== */
+
+    @media(max-width:768px){
+
+      nav{
+        padding:20px;
+      }
+
+      h1{
+        font-size:52px;
+      }
+
+      .subtitle{
+        font-size:20px;
+      }
+
+      .hero p{
+        font-size:18px;
+      }
+
+      .features h2,
+      .cta-box h2{
+        font-size:38px;
+      }
+
+      .cta-box{
+        padding:45px 25px;
+      }
+
+    }
+
+  </style>
+
+</head>
+
+<body>
+
+  <nav>
+
+    <div class="logo">
+      Menstru<span>Mate</span>
+    </div>
+
+    <div class="nav-buttons">
+
+      <button
+        class="login-btn"
+        onclick="window.location.href='/login'"
+      >
+        Login
+      </button>
+
+      <button
+        class="signup-btn"
+        onclick="window.location.href='/signup'"
+      >
+        Sign Up
+      </button>
+
+    </div>
+
+  </nav>
+
+  <!-- HERO -->
+
+  <section class="hero">
+
+    <div class="glow1"></div>
+    <div class="glow2"></div>
+
+    <div class="hero-content">
+
+      <div class="badge">
+        🌸 Smart Wellness Companion
+      </div>
+
+      <h1>
+
+        Sync With Your
+
+        <span class="gradient">
+          Cycle
+        </span>
+
+      </h1>
+
+      <div class="subtitle">
+        Personalized menstrual wellness powered by intelligent insights
+      </div>
+
+      <p>
+
+        Track your cycle,
+        predict ovulation,
+        receive wellness guidance,
+        monitor patterns,
+        and understand your body better with a beautiful intelligent experience.
+
+      </p>
+
+      <div class="hero-buttons">
+
+        <button
+          class="primary-btn"
+          onclick="window.location.href='/signup'"
+        >
+          Start Your Journey →
+        </button>
+
+        <button
+          class="secondary-btn"
+          onclick="window.location.href='/login'"
+        >
+          Login
+        </button>
+
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- FEATURES -->
+
+  <section class="features">
+
+    <h2>
+      Why MenstruMate?
+    </h2>
+
+    <div class="feature-grid">
+
+      <div class="feature-card">
+
+        <div class="icon">
+          📅
+        </div>
+
+        <h3>
+          Smart Cycle Tracking
+        </h3>
+
+        <p>
+          Adaptive predictions using your previous cycles for more accurate tracking.
+        </p>
+
+      </div>
+
+      <div class="feature-card">
+
+        <div class="icon">
+          🌸
+        </div>
+
+        <h3>
+          Phase Insights
+        </h3>
+
+        <p>
+          Understand menstruation,
+          follicular,
+          ovulation,
+          and luteal phases deeply.
+        </p>
+
+      </div>
+
+      <div class="feature-card">
+
+        <div class="icon">
+          🧘
+        </div>
+
+        <h3>
+          Wellness Guidance
+        </h3>
+
+        <p>
+          Personalized yoga,
+          exercise,
+          and nutrition suggestions for every phase.
+        </p>
+
+      </div>
+
+      <div class="feature-card">
+
+        <div class="icon">
+          🔔
+        </div>
+
+        <h3>
+          Smart Notifications
+        </h3>
+
+        <p>
+          Get reminders for fertile windows,
+          ovulation,
+          and upcoming periods.
+        </p>
+
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- CTA -->
+
+  <section class="cta">
+
+    <div class="cta-box">
+
+      <h2>
+        Begin Your Wellness Journey
+      </h2>
+
+      <p>
+
+        Take control of your cycle,
+        health,
+        and wellness with beautifully personalized insights.
+
+      </p>
+
+      <button
+        class="primary-btn"
+        onclick="window.location.href='/signup'"
+      >
+        Create Free Account
+      </button>
+
+    </div>
+
+  </section>
+
+  <footer>
+    © 2026 MenstruMate • Sync With Your Cycle 🌸
+  </footer>
+
+</body>
+</html>
