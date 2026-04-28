@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cravings</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<h1>🍔 Cravings Corner</h1>
+
+<div class="page-container">
+
+    <div class="content-box">
+
+        <h2>Food Suggestions</h2>
+
+        <button onclick="suggestFood()">
+            Suggest Food 😭
+        </button>
+
+        <p id="foodResult"></p>
+
+        <br>
+
+        <select id="mood">
+            <option value="sad">Sad</option>
+            <option value="happy">Happy</option>
+            <option value="tired">Tired</option>
+        </select>
+
+        <button onclick="recommendFood()">
+            Recommend
+        </button>
+
+        <p id="recommendation"></p>
+
+    </div>
+
+    <div class="content-box">
+
+        <h2>Order Food</h2>
+
+        <a href="https://www.zomato.com" target="_blank">
+            🍕 Order on Zomato
+        </a>
+
+        <a href="https://www.swiggy.com" target="_blank">
+            🍔 Order on Swiggy
+        </a>
+
+    </div>
+
+</div>
+
+<script src="script.js"></script>
+
+</body>
+</html>
