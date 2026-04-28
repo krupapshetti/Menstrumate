@@ -7,15 +7,31 @@ const path = require("path");
 
 const User = require("./models/User");
 
+// ROUTES
+const cartRoutes = require("./routes/cart");
+const paymentRoutes = require("./routes/payment");
+const dietRoutes = require("./routes/diet");
+
 const app = express();
 
-// 🔐 Secret key
-const SECRET = "mysecretkey";
+// SECRET
+const SECRET = process.env.JWT_SECRET || "mysecretkey";
 
-// ✅ Middleware
+// ======================
+// ✅ MIDDLEWARE
+// ======================
 app.use(cors());
 app.use(express.json());
-app.use(express.static("public"));
+
+// ✅ STATIC FILES (VERY IMPORTANT)
+app.use(express.static(path.join(__dirname, "public")));
+
+// ======================
+// ✅ API ROUTES
+// ======================
+app.use("/api/cart", cartRoutes);
+app.use("/api/payment", paymentRoutes);
+app.use("/api/diet", dietRoutes);
 
 // ======================
 // 🔐 AUTH MIDDLEWARE
@@ -41,6 +57,10 @@ function authMiddleware(req, res, next) {
 // ======================
 // 📄 PAGE ROUTES
 // ======================
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "shop.html"));
+});
+
 app.get("/signup", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "signup.html"));
 });
@@ -53,40 +73,16 @@ app.get("/dashboard-page", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
+app.get("/cart-page", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "cart.html"));
+});
+
 // ======================
 // 🗄️ DATABASE
 // ======================
 mongoose.connect("mongodb://127.0.0.1:27017/menstrualApp")
   .then(() => console.log("MongoDB Connected"))
   .catch(err => console.log(err));
-
-// ======================
-// 🧠 CYCLE LOGIC
-// ======================
-function calculateCyclePhases(lastPeriod, cycleLength) {
-  const startDate = new Date(lastPeriod);
-  const days = [];
-
-  for (let i = 1; i <= cycleLength; i++) {
-    const date = new Date(startDate);
-    date.setDate(startDate.getDate() + (i - 1));
-
-    let phase = "";
-
-    if (i >= 1 && i <= 6) phase = "Menstruation";
-    else if (i >= 7 && i <= (cycleLength - 17)) phase = "Follicular";
-    else if (i >= (cycleLength - 16) && i <= (cycleLength - 14)) phase = "Ovulation";
-    else phase = "Luteal";
-
-    days.push({
-      day: i,
-      date: date.toISOString().split("T")[0],
-      phase
-    });
-  }
-
-  return days;
-}
 
 // ======================
 // 📝 SIGNUP
@@ -121,7 +117,6 @@ app.post("/signup", async (req, res) => {
     res.json({ message: "User created successfully" });
 
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: "User already exists or error occurred" });
   }
 });
@@ -147,13 +142,13 @@ app.post("/login", async (req, res) => {
 
     res.json({ token });
 
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Login error" });
   }
 });
 
 // ======================
-// 📊 DASHBOARD (PER USER)
+// 📊 DASHBOARD
 // ======================
 app.get("/dashboard", authMiddleware, async (req, res) => {
   try {
@@ -164,131 +159,59 @@ app.get("/dashboard", authMiddleware, async (req, res) => {
       user.cycleLength
     );
 
-    const insights = calculateInsights(
-      user.lastPeriod,
-      user.cycleLength
-    );
-
     const today = new Date().toISOString().split("T")[0];
+    const todayData = cycleData.find(d => d.date === today);
 
-const todayData = cycleData.find(d => d.date === today);
+    res.json({
+      user,
+      cycle: cycleData,
+      guidance: todayData ? getPhaseGuidance(todayData.phase) : null
+    });
 
-const guidance = todayData ? getPhaseGuidance(todayData.phase) : null;
-
-res.json({
-  user,
-  cycle: cycleData,
-  insights,
-  guidance
-});
-
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Error loading dashboard" });
   }
 });
 
-app.get("/guidance", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "guidance.html"));
-});
-
-
-app.post("/log-cycle", authMiddleware, async (req, res) => {
-  try {
-    const { newStartDate } = req.body;
-
-    const user = await User.findById(req.user.id);
-
-    // Calculate previous cycle length
-    const lastDate = new Date(user.lastPeriod);
-    const newDate = new Date(newStartDate);
-
-    const diffDays = Math.round(
-      (newDate - lastDate) / (1000 * 60 * 60 * 24)
-    );
-
-    // Save old cycle in history
-    user.cycleHistory.push({
-      cycleLength: diffDays,
-      startDate: newDate
-    });
-
-    // Update cycle length using your formula
-    user.cycleLength = updateCycleLength(user.cycleLength, diffDays);
-
-    // Update last period
-    user.lastPeriod = newDate;
-
-    await user.save();
-
-    res.json({
-      message: "Cycle updated",
-      newCycleLength: user.cycleLength
-    });
-
-  } catch (err) {
-    res.status(500).json({ error: "Error updating cycle" });
-  }
-});
 // ======================
 // 🚀 START SERVER
 // ======================
 app.listen(3000, () => {
   console.log("Server running on http://localhost:3000");
 });
-function calculateInsights(lastPeriod, cycleLength) {
-  const start = new Date(lastPeriod);
 
-  // Ovulation ≈ cycleLength - 14
-  const ovulationDay = cycleLength - 14;
+// ======================
+// 📊 HELPERS
+// ======================
+function calculateCyclePhases(lastPeriod, cycleLength) {
+  const startDate = new Date(lastPeriod);
+  const days = [];
 
-  const ovulationDate = new Date(start);
-  ovulationDate.setDate(start.getDate() + ovulationDay - 1);
+  for (let i = 1; i <= cycleLength; i++) {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + (i - 1));
 
-  // Fertile window: 5 days before ovulation + ovulation day
-  const fertileStart = new Date(ovulationDate);
-  fertileStart.setDate(ovulationDate.getDate() - 5);
+    let phase = "";
+    if (i <= 6) phase = "Menstruation";
+    else if (i <= cycleLength - 17) phase = "Follicular";
+    else if (i <= cycleLength - 14) phase = "Ovulation";
+    else phase = "Luteal";
 
-  const fertileEnd = new Date(ovulationDate);
+    days.push({
+      day: i,
+      date: date.toISOString().split("T")[0],
+      phase
+    });
+  }
 
-  // Next period = lastPeriod + cycleLength
-  const nextPeriod = new Date(start);
-  nextPeriod.setDate(start.getDate() + cycleLength);
-
-  return {
-    nextPeriod: nextPeriod.toISOString().split("T")[0],
-    ovulation: ovulationDate.toISOString().split("T")[0],
-    fertileStart: fertileStart.toISOString().split("T")[0],
-    fertileEnd: fertileEnd.toISOString().split("T")[0]
-  };
-}
-
-function updateCycleLength(oldCycle, previousCycle) {
-  return Math.round((4 * oldCycle + previousCycle) / 5);
+  return days;
 }
 
 function getPhaseGuidance(phase) {
-  const data = {
-    Menstruation: {
-      diet: ["Spinach", "Lentils", "Herbal tea"],
-      yoga: ["Child Pose", "Cat-Cow"],
-      exercise: "Light walking only"
-    },
-    Follicular: {
-      diet: ["Fruits", "Protein foods"],
-      yoga: ["Sun Salutation"],
-      exercise: "Cardio + gym"
-    },
-    Ovulation: {
-      diet: ["Fruits", "Nuts"],
-      yoga: ["Power yoga"],
-      exercise: "HIIT + strength training"
-    },
-    Luteal: {
-      diet: ["Oats", "Bananas"],
-      yoga: ["Meditation"],
-      exercise: "Moderate workouts"
-    }
-  };
-
-  return data[phase];
+  return {
+    Menstruation: { diet: ["Spinach", "Tea"], exercise: "Rest" },
+    Follicular: { diet: ["Fruits"], exercise: "Light workout" },
+    Ovulation: { diet: ["Nuts"], exercise: "Intense workout" },
+    Luteal: { diet: ["Bananas"], exercise: "Moderate workout" }
+  }[phase];
 }
