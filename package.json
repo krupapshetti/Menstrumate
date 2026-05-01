@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js"
+    "test": "node --check server.js",
+    "migrate:json": "node scripts/migrate-json-to-mongo.js"
   },
   "keywords": [],
   "author": "",

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signup | Menstrumate</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="auth-wrap page">
+    <section class="auth-card">
+      <a class="back-link" href="/select-role.html">Back</a>
+      <p class="landing-kicker" id="signupKicker">Create account</p>
+      <h1 id="signupTitle">Create Account</h1>
+      <p class="muted" id="signupSubtitle">Start your Menstrumate journey with a secure account.</p>
+
+      <form id="signupForm" class="form-grid">
+        <label class="field">
+          <span>Name</span>
+          <input id="name" autocomplete="name" required>
+        </label>
+
+        <label class="field">
+          <span>Email</span>
+          <input id="email" type="email" autocomplete="email" required>
+        </label>
+
+        <label class="field">
+          <span>Password</span>
+          <input id="password" type="password" minlength="6" autocomplete="new-password" required>
+        </label>
+
+        <label class="field">
+          <span>Confirm Password</span>
+          <input id="confirmPassword" type="password" minlength="6" autocomplete="new-password" required>
+        </label>
+
+        <label class="field doctor-only" hidden>
+          <span>Specialization</span>
+          <select id="specialization">
+            <option value="">Select specialization</option>
+            <option>Gynecologist</option>
+            <option>General Physician</option>
+            <option>Reproductive Health Specialist</option>
+            <option>Nutrition Specialist</option>
+            <option>Mental Wellness Counselor</option>
+          </select>
+        </label>
+
+        <label class="field doctor-only" hidden>
+          <span>Clinic/Hospital Name</span>
+          <input id="clinic" placeholder="Optional">
+        </label>
+
+        <label class="field">
+          <span>OTP</span>
+          <input id="otp" placeholder="Generate OTP first" required>
+        </label>
+
+        <div class="field btn-row">
+          <span>&nbsp;</span>
+          <button class="btn secondary" type="button" id="otpBtn">Generate OTP</button>
+          <button class="btn" type="submit">Create Account</button>
+        </div>
+      </form>
+
+      <div id="signupMessage"></div>
+    </section>
+  </main>
+  <script src="/signup.js"></script>
+</body>
+</html>

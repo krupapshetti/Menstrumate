@@ -2,6 +2,7 @@ const symptomsApp = document.getElementById("symptomsApp");
 const symptomsToken = localStorage.getItem("menstrumateToken");
 let currentUser = null;
 let symptomOptions = [];
+const onboardingMode = new URLSearchParams(window.location.search).get("onboarding") === "1";
 
 function symptomsApi(path, options = {}) {
   return fetch(path, {
@@ -45,10 +46,34 @@ async function initSymptoms() {
     const options = await symptomsApi("/api/symptom-options");
     symptomOptions = options.symptoms || [];
     renderSymptomsPage();
+    showOnboardingMessage();
     await loadHistory();
   } catch {
     window.location.href = "/";
   }
+}
+
+function showOnboardingMessage() {
+  if (!onboardingMode && !currentUser?.isFirstLogin) return;
+  document.getElementById("symptomsForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  document.querySelector(".symptom-chip input")?.focus();
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="modal-backdrop" id="symptomOnboardingModal">
+      <section class="appointment-modal">
+        <button class="modal-close" id="closeSymptomOnboarding">x</button>
+        <p class="landing-kicker">Welcome</p>
+        <h2>Welcome to Menstrumate 💖</h2>
+        <p class="muted">Let’s start by understanding how you feel today.</p>
+        <button class="btn" id="startSymptomOnboarding">Start check-in</button>
+      </section>
+    </div>
+  `);
+  const close = () => {
+    document.getElementById("symptomOnboardingModal")?.remove();
+    document.querySelector(".symptom-chip input")?.focus();
+  };
+  document.getElementById("closeSymptomOnboarding").addEventListener("click", close);
+  document.getElementById("startSymptomOnboarding").addEventListener("click", close);
 }
 
 function renderSymptomsPage() {
@@ -139,6 +164,10 @@ async function saveSymptoms(event) {
     message.className = "notice";
     message.textContent = "Symptoms saved.";
     await loadHistory();
+    if (onboardingMode || currentUser?.isFirstLogin) {
+      currentUser.isFirstLogin = false;
+      window.location.href = "/#dashboard";
+    }
   } catch (err) {
     message.className = "notice error";
     message.textContent = err.message;

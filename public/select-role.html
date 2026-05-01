@@ -10,25 +10,42 @@
   <main class="role-select-page">
     <section class="role-select-shell">
       <a class="back-link" href="/">Back</a>
-      <p class="landing-kicker">Choose your login</p>
-      <h1>Welcome back</h1>
+      <p class="landing-kicker" id="roleKicker">Choose your role</p>
+      <h1 id="roleTitle">Get started</h1>
       <div class="title-accent"></div>
-      <p class="landing-subtitle">Select how you want to continue</p>
+      <p class="landing-subtitle" id="roleSubtitle">Create the right account for your Menstrumate experience</p>
 
       <div class="role-select-grid">
         <article class="role-select-card">
-          <h2>Login as User</h2>
-          <p>Track your cycle, wellness, shop, diet plan, yoga, and doctor chat.</p>
-          <a class="btn role-select-btn" href="/?auth=login&role=user">Continue as User</a>
+          <h2 id="userCardTitle">Continue as User</h2>
+          <p>Track your cycle, symptoms, shop essentials, get insights, yoga guidance, and chat with doctors.</p>
+          <a class="btn role-select-btn" id="userAction" href="/signup.html?role=user">Continue as User</a>
         </article>
 
         <article class="role-select-card">
-          <h2>Login as Doctor</h2>
-          <p>Review patient messages, alerts, recommendations, and dashboard insights.</p>
-          <a class="btn secondary role-select-btn" href="/?auth=login&role=doctor">Continue as Doctor</a>
+          <h2 id="doctorCardTitle">Continue as Doctor</h2>
+          <p>Manage patients, view shared symptoms, monitor alerts, reply to chats, and track appointments.</p>
+          <a class="btn secondary role-select-btn" id="doctorAction" href="/signup.html?role=doctor">Continue as Doctor</a>
         </article>
       </div>
     </section>
   </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get("mode") === "login" ? "login" : "signup";
+
+    if (mode === "login") {
+      document.getElementById("roleKicker").textContent = "Choose your login";
+      document.getElementById("roleTitle").textContent = "Welcome back";
+      document.getElementById("roleSubtitle").textContent = "Select how you want to continue";
+      document.getElementById("userCardTitle").textContent = "Login as User";
+      document.getElementById("doctorCardTitle").textContent = "Login as Doctor";
+      document.getElementById("userAction").textContent = "Login as User";
+      document.getElementById("doctorAction").textContent = "Login as Doctor";
+      document.getElementById("userAction").href = "/?auth=login&role=user";
+      document.getElementById("doctorAction").href = "/?auth=login&role=doctor";
+    }
+  </script>
 </body>
 </html>

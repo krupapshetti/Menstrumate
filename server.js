@@ -2,20 +2,30 @@ const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const fs = require("fs/promises");
 const path = require("path");
+const connectDB = require("./config/db");
+const User = require("./models/User");
+const Symptom = require("./models/Symptom");
+const Chat = require("./models/Chat");
+const Appointment = require("./models/Appointment");
+const Otp = require("./models/Otp");
+const Cart = require("./models/Cart");
+const Payment = require("./models/Payment");
+const PatientMessage = require("./models/PatientMessage");
+const PatientRecommendation = require("./models/PatientRecommendation");
+const FollowUp = require("./models/FollowUp");
+const ActivityLog = require("./models/ActivityLog");
+const CycleHistory = require("./models/CycleHistory");
+const AppState = require("./models/AppState");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SECRET = process.env.JWT_SECRET || "menstrumate-dev-secret";
-const DB_DIR = path.join(__dirname, "data");
-const DB_FILE = path.join(DB_DIR, "db.json");
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.get([
   "/login.html",
-  "/signup.html",
   "/shop.html",
   "/cart.html",
   "/checkout.html",
@@ -148,27 +158,155 @@ function normalizeDb(parsed = {}) {
     ...doctor,
     role: "doctor",
     isOnline: Boolean(doctor.isOnline),
+    specialty: doctor.specialty || doctor.specialization || "Gynecology",
+    specialization: doctor.specialization || doctor.specialty || "Gynecology",
     lastSeen: doctor.lastSeen || doctor.createdAt || null
+  }));
+  db.users = db.users.map((user) => ({
+    ...user,
+    isFirstLogin: Boolean(user.isFirstLogin)
   }));
   return db;
 }
 
+function stripMongo(doc) {
+  if (!doc) return doc;
+  const plain = typeof doc.toObject === "function" ? doc.toObject() : { ...doc };
+  delete plain._id;
+  delete plain.__v;
+  return plain;
+}
+
+function objectFromKeyedDocs(docs, keyField, valueField) {
+  return docs.reduce((result, doc) => {
+    const item = stripMongo(doc);
+    result[item[keyField]] = item[valueField] || [];
+    return result;
+  }, {});
+}
+
+async function ensureAppState() {
+  const existing = await AppState.findOne({ key: "default" }).lean();
+  if (existing) return existing;
+  const created = await AppState.create({
+    key: "default",
+    products: seedProducts,
+    yoga: seedYoga,
+    education: seedEducation,
+    notifications: seedNotifications,
+    symptomOptions: seedSymptomOptions,
+    insightRules: seedInsightRules,
+    appointmentSlots: seedAppointmentSlots,
+    shopRules: seedShopRules
+  });
+  return created.toObject();
+}
+
 async function readDb() {
-  await fs.mkdir(DB_DIR, { recursive: true });
-  try {
-    const raw = await fs.readFile(DB_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    return normalizeDb(parsed);
-  } catch {
-    const db = normalizeDb(defaultDb);
-    await writeDb(db);
-    return structuredClone(db);
-  }
+  const [
+    appState,
+    accounts,
+    otps,
+    carts,
+    payments,
+    cycles,
+    patientMessages,
+    patientRecommendations,
+    followUps,
+    activityLogs,
+    chats,
+    symptoms,
+    appointments
+  ] = await Promise.all([
+    ensureAppState(),
+    User.find({}).lean(),
+    Otp.find({}).lean(),
+    Cart.find({}).lean(),
+    Payment.find({}).lean(),
+    CycleHistory.find({}).lean(),
+    PatientMessage.find({}).lean(),
+    PatientRecommendation.find({}).lean(),
+    FollowUp.find({}).lean(),
+    ActivityLog.find({}).lean(),
+    Chat.find({}).lean(),
+    Symptom.find({}).lean(),
+    Appointment.find({}).lean()
+  ]);
+
+  const db = normalizeDb({
+    users: accounts.filter((account) => account.role === "user").map(stripMongo),
+    doctors: accounts.filter((account) => account.role === "doctor").map(stripMongo),
+    otps: otps.map(stripMongo),
+    carts: objectFromKeyedDocs(carts, "userId", "items"),
+    payments: payments.map(stripMongo),
+    cycles: objectFromKeyedDocs(cycles, "userId", "history"),
+    patientMessages: patientMessages.map(stripMongo),
+    patientRecommendations: patientRecommendations.map(stripMongo),
+    followUps: followUps.map(stripMongo),
+    activityLogs: objectFromKeyedDocs(activityLogs, "userId", "logs"),
+    chats: chats.map((chat) => {
+      const item = stripMongo(chat);
+      if (item.typing instanceof Map) item.typing = Object.fromEntries(item.typing);
+      return item;
+    }),
+    symptoms: symptoms.map(stripMongo),
+    appointments: appointments.map(stripMongo),
+    products: appState.products,
+    yoga: appState.yoga,
+    education: appState.education,
+    notifications: appState.notifications,
+    symptomOptions: appState.symptomOptions,
+    insightRules: appState.insightRules,
+    appointmentSlots: appState.appointmentSlots,
+    shopRules: appState.shopRules
+  });
+  return structuredClone(db);
+}
+
+async function replaceCollection(Model, docs) {
+  await Model.deleteMany({});
+  if (docs.length) await Model.insertMany(docs, { ordered: false });
+}
+
+function keyedArrayDocs(objectValue, keyField, valueField) {
+  return Object.entries(objectValue || {}).map(([key, value]) => ({
+    [keyField]: key,
+    [valueField]: Array.isArray(value) ? value : []
+  }));
 }
 
 async function writeDb(db) {
-  await fs.mkdir(DB_DIR, { recursive: true });
-  await fs.writeFile(DB_FILE, JSON.stringify(db, null, 2));
+  const normalized = normalizeDb(db);
+  await Promise.all([
+    replaceCollection(User, [...normalized.users, ...normalized.doctors]),
+    replaceCollection(Otp, normalized.otps),
+    replaceCollection(Cart, Object.entries(normalized.carts || {}).map(([userId, items]) => ({ userId, items }))),
+    replaceCollection(Payment, normalized.payments),
+    replaceCollection(CycleHistory, keyedArrayDocs(normalized.cycles, "userId", "history")),
+    replaceCollection(PatientMessage, normalized.patientMessages),
+    replaceCollection(PatientRecommendation, normalized.patientRecommendations),
+    replaceCollection(FollowUp, normalized.followUps),
+    replaceCollection(ActivityLog, keyedArrayDocs(normalized.activityLogs, "userId", "logs")),
+    replaceCollection(Chat, normalized.chats),
+    replaceCollection(Symptom, normalized.symptoms),
+    replaceCollection(Appointment, normalized.appointments),
+    AppState.updateOne(
+      { key: "default" },
+      {
+        $set: {
+          products: normalized.products,
+          yoga: normalized.yoga,
+          education: normalized.education,
+          notifications: normalized.notifications,
+          symptomOptions: normalized.symptomOptions,
+          insightRules: normalized.insightRules,
+          appointmentSlots: normalized.appointmentSlots,
+          shopRules: normalized.shopRules
+        }
+      },
+      { upsert: true }
+    )
+  ]);
 }
 
 function publicAccount(account) {
@@ -617,12 +755,14 @@ app.post("/api/auth/request-otp", asyncRoute(async (req, res) => {
 }));
 
 app.post("/api/auth/signup", asyncRoute(async (req, res) => {
-  const { role, name, email, otp, password, confirmPassword, specialty, clinic, cycleLength, lastPeriod } = req.body;
+  const { role, name, email, otp, password, confirmPassword, specialty, specialization, experience, clinic, cycleLength, lastPeriod } = req.body;
   const requiredError = requireFields(req.body, ["role", "name", "email", "otp", "password", "confirmPassword"]);
   if (requiredError) return res.status(400).json({ error: requiredError });
   if (!["user", "doctor"].includes(role)) return res.status(400).json({ error: "Invalid role" });
   if (password !== confirmPassword) return res.status(400).json({ error: "Passwords do not match" });
   if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+  const doctorSpecialty = String(specialization || specialty || "").trim();
+  if (role === "doctor" && !doctorSpecialty) return res.status(400).json({ error: "Specialization is required" });
 
   const db = await readDb();
   const normalizedEmail = email.toLowerCase();
@@ -645,13 +785,16 @@ app.post("/api/auth/signup", asyncRoute(async (req, res) => {
   };
 
   if (role === "doctor") {
-    account.specialty = specialty || "Gynecology";
-    account.clinic = clinic || "Menstrumate Clinic";
+    account.specialty = doctorSpecialty;
+    account.specialization = doctorSpecialty;
+    account.experience = String(experience || "").trim();
+    account.clinic = String(clinic || "").trim();
     account.isOnline = true;
     account.lastSeen = new Date().toISOString();
   } else {
     account.cycleLength = Number(cycleLength) || 28;
     account.lastPeriod = lastPeriod || new Date().toISOString().slice(0, 10);
+    account.isFirstLogin = true;
     db.cycles[account.id] = [{ startDate: account.lastPeriod, cycleLength: account.cycleLength }];
     logActivity(db, account.id, "signup", "Patient account created");
   }
@@ -1037,6 +1180,7 @@ app.post("/api/symptoms", requireAuth, asyncRoute(async (req, res) => {
   };
   if (existing) Object.assign(existing, payload);
   else db.symptoms.push({ ...payload, createdAt: new Date().toISOString() });
+  user.isFirstLogin = false;
   logActivity(db, req.auth.id, "symptoms", `${cleanedSymptoms.join(", ")} | pain ${parsedPain}/10`);
   await writeDb(db);
   res.status(existing ? 200 : 201).json({ symptom: existing || db.symptoms[db.symptoms.length - 1] });
@@ -1312,6 +1456,16 @@ app.get([
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.listen(PORT, () => {
-  console.log(`Menstrumate running on http://localhost:${PORT}`);
-});
+async function startServer() {
+  try {
+    await connectDB();
+    app.listen(PORT, () => {
+      console.log(`Menstrumate running on http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error("Failed to start Menstrumate:", err.message);
+    process.exit(1);
+  }
+}
+
+startServer();

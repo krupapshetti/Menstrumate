@@ -83,23 +83,14 @@ function showMessage(id, message, isError = false) {
 function renderLanding() {
   app.innerHTML = `
     <section class="landing minimal-landing page">
-      <nav class="landing-nav">
-        <div class="landing-logo">Menstru<span>Mate</span></div>
-        <div class="landing-nav-actions">
-          <button class="nav-login" id="loginTopBtn">Login</button>
-          <button class="nav-signup" id="signupTopBtn">Sign Up</button>
-        </div>
-      </nav>
-
       <div class="landing-ambient landing-ambient-one"></div>
       <div class="landing-ambient landing-ambient-two"></div>
 
       <div class="landing-hero-content">
-        <div class="landing-badge">Smart Wellness Companion</div>
         <h1>Menstrumate</h1>
         <div class="title-accent"></div>
         <p class="landing-subtitle">Your personal menstrual wellness companion</p>
-        <p class="landing-copy">Track your cycle, understand your body, and move through every phase with calm, personalized care.</p>
+        <p class="landing-copy">Track cycles, symptoms, care, and doctor support in one calm wellness space.</p>
         <div class="landing-actions">
           <button class="btn landing-primary" id="getStartedBtn">Get Started</button>
           <button class="btn secondary landing-secondary" id="loginEntryBtn">Login</button>
@@ -108,16 +99,10 @@ function renderLanding() {
     </section>
   `;
   document.getElementById("getStartedBtn").addEventListener("click", () => {
-    renderAuth("signup", "user");
+    window.location.href = "/select-role.html";
   });
   document.getElementById("loginEntryBtn").addEventListener("click", () => {
-    window.location.href = "/select-role.html";
-  });
-  document.getElementById("loginTopBtn").addEventListener("click", () => {
-    window.location.href = "/select-role.html";
-  });
-  document.getElementById("signupTopBtn").addEventListener("click", () => {
-    renderAuth("signup", "user");
+    window.location.href = "/select-role.html?mode=login";
   });
 }
 
@@ -207,6 +192,10 @@ function renderAuth(mode, role) {
         window.location.href = "/doctor-dashboard.html";
         return;
       }
+      if (isSignup || data.account?.isFirstLogin) {
+        window.location.href = "/symptoms.html?onboarding=1";
+        return;
+      }
       state.view = role === "doctor" ? "doctors" : "dashboard";
       await renderApp();
     } catch (err) {
@@ -227,6 +216,10 @@ async function renderApp() {
   }
   if (state.account.role === "doctor") {
     window.location.href = "/doctor-dashboard.html";
+    return;
+  }
+  if (state.account.isFirstLogin && !window.location.pathname.endsWith("/symptoms.html")) {
+    window.location.href = "/symptoms.html?onboarding=1";
     return;
   }
   app.innerHTML = `
