@@ -2,12 +2,19 @@
 <html>
 <head>
   <title>Dashboard</title>
+
   <style>
     body {
       font-family: Arial;
       background: #111;
       color: white;
       text-align: center;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h1 {
+      margin-bottom: 20px;
     }
 
     .insights {
@@ -15,6 +22,7 @@
       justify-content: center;
       gap: 20px;
       margin: 20px;
+      flex-wrap: wrap;
     }
 
     .card {
@@ -54,13 +62,35 @@
       visibility: hidden;
     }
 
-    .Menstruation { background: #ff7675; }
-    .Follicular { background: #74b9ff; }
-    .Ovulation { background: #55efc4; }
-    .Luteal { background: #ffeaa7; color: black; }
+    .Menstruation {
+      background: #ff7675;
+    }
+
+    .Follicular {
+      background: #74b9ff;
+    }
+
+    .Ovulation {
+      background: #55efc4;
+      color: black;
+    }
+
+    .Luteal {
+      background: #ffeaa7;
+      color: black;
+    }
 
     .today {
       border: 2px solid white;
+    }
+
+    .buttons {
+      margin-top: 20px;
+
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      flex-wrap: wrap;
     }
 
     button {
@@ -70,224 +100,429 @@
       background: #6c5ce7;
       color: white;
       cursor: pointer;
+      font-size: 14px;
     }
 
     button:hover {
       background: #a29bfe;
     }
+
+    #guidance {
+      margin-top: 30px;
+      line-height: 1.8;
+    }
   </style>
 </head>
+
 <body>
 
-<h1>Cycle Dashboard</h1>
+  <h1>Cycle Dashboard</h1>
 
-<div class="insights" id="insights"></div>
+  <div class="insights" id="insights"></div>
 
-<h2 id="monthTitle"></h2>
+  <h2 id="monthTitle"></h2>
 
-<div class="header">
-  <div>Sun</div><div>Mon</div><div>Tue</div>
-  <div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
-</div>
+  <div class="header">
+    <div>Sun</div>
+    <div>Mon</div>
+    <div>Tue</div>
+    <div>Wed</div>
+    <div>Thu</div>
+    <div>Fri</div>
+    <div>Sat</div>
+  </div>
 
-<div class="calendar" id="calendar"></div>
-<button onclick="window.location.href='/guidance'">
-  Wellness Guidance
-</button>
-<button onclick="logNewCycle()">Log New Period</button>
-<div id="guidance"></div>
-<script>
-// =====================
-// 🔔 NOTIFICATIONS
-// =====================
-async function requestNotificationPermission() {
-  if ("Notification" in window) {
-    if (Notification.permission !== "granted") {
-      await Notification.requestPermission();
-    }
-  }
-}
+  <div class="calendar" id="calendar"></div>
 
-function sendNotification(title, body) {
-  if (Notification.permission === "granted") {
-    new Notification(title, { body });
-  }
-}
+  <!-- BUTTONS -->
+  <div class="buttons">
 
-// avoid spam
-function shouldNotify(key) {
-  const today = new Date().toISOString().split("T")[0];
-  const stored = localStorage.getItem(key);
+    <button onclick="window.location.href='/guidance'">
+      Wellness Guidance
+    </button>
 
-  if (stored === today) return false;
+    <button onclick="window.location.href='/shop'">
+      Shop
+    </button>
 
-  localStorage.setItem(key, today);
-  return true;
-}
+    <button onclick="window.location.href='/'">
+      Home
+    </button>
 
-// =====================
-// 📊 LOAD DASHBOARD
-// =====================
-async function loadDashboard() {
-  const token = localStorage.getItem("token");
+    <button onclick="logNewCycle()">
+      Log New Period
+    </button>
 
-  if (!token) {
-    window.location.href = "/login";
-    return;
-  }
+  </div>
 
-  await requestNotificationPermission();
+  <div id="guidance"></div>
 
-  const res = await fetch("/dashboard", {
-    headers: {
-      "Authorization": "Bearer " + token
-    }
-  });
+  <script>
 
-  const data = await res.json();
+    // =====================
+    // 🔔 NOTIFICATIONS
+    // =====================
 
-  if (data.error) {
-    localStorage.removeItem("token");
-    window.location.href = "/login";
-    return;
-  }
+    async function requestNotificationPermission() {
 
-  // =====================
-  // 🔥 INSIGHTS
-  // =====================
-  const insightsDiv = document.getElementById("insights");
+      if ("Notification" in window) {
 
-  insightsDiv.innerHTML = `
-    <div class="card">
-      <h3>Next Period</h3>
-      <p>${data.insights.nextPeriod}</p>
-    </div>
+        if (Notification.permission !== "granted") {
+          await Notification.requestPermission();
+        }
 
-    <div class="card">
-      <h3>Ovulation</h3>
-      <p>${data.insights.ovulation}</p>
-    </div>
+      }
 
-    <div class="card">
-      <h3>Fertile Window</h3>
-      <p>${data.insights.fertileStart} → ${data.insights.fertileEnd}</p>
-    </div>
-  `;
-
-  // =====================
-  // 🗓 MONTH TITLE
-  // =====================
-  const monthTitle = document.getElementById("monthTitle");
-
-  const start = new Date(data.cycle[0].date);
-  const end = new Date(data.cycle[data.cycle.length - 1].date);
-
-  const options = { month: "short", year: "numeric" };
-
-  monthTitle.innerText =
-    start.toLocaleDateString(undefined, options) +
-    " - " +
-    end.toLocaleDateString(undefined, options);
-
-  // =====================
-  // 📅 CALENDAR
-  // =====================
-  const calendar = document.getElementById("calendar");
-  calendar.innerHTML = "";
-
-  const today = new Date().toISOString().split("T")[0];
-
-  const firstDay = new Date(data.cycle[0].date).getDay();
-
-  for (let i = 0; i < firstDay; i++) {
-    const empty = document.createElement("div");
-    empty.className = "day empty";
-    calendar.appendChild(empty);
-  }
-
-  data.cycle.forEach(day => {
-    const div = document.createElement("div");
-    div.className = "day " + day.phase;
-
-    if (day.date === today) {
-      div.classList.add("today");
     }
 
-    div.innerHTML = `
-      <strong>${day.date.split("-")[2]}</strong><br>
-      ${day.phase}
-    `;
+    function sendNotification(title, body) {
 
-    calendar.appendChild(div);
-  });
+      if (Notification.permission === "granted") {
 
-  // =====================
-  // 🧠 GUIDANCE (FIXED)
-  // =====================
-  const guidanceDiv = document.getElementById("guidance");
+        new Notification(title, {
+          body
+        });
 
-  if (data.guidance) {
-    guidanceDiv.innerHTML = `
-      <h2>Today's Guidance (${data.guidance.phase || ""})</h2>
+      }
 
-      <p><strong>Diet:</strong> ${data.guidance.diet.join(", ")}</p>
-      <p><strong>Yoga:</strong> ${data.guidance.yoga.join(", ")}</p>
-      <p><strong>Exercise:</strong> ${data.guidance.exercise}</p>
-    `;
-  }
+    }
 
-  // =====================
-  // 🔔 NOTIFICATION LOGIC
-  // =====================
-  const nextPeriod = data.insights.nextPeriod;
-  const ovulation = data.insights.ovulation;
-  const fertileStart = data.insights.fertileStart;
+    // avoid spam
+    function shouldNotify(key) {
 
-  const periodReminder = new Date(nextPeriod);
-  periodReminder.setDate(periodReminder.getDate() - 2);
-  const periodReminderStr = periodReminder.toISOString().split("T")[0];
+      const today =
+        new Date().toISOString().split("T")[0];
 
-  if (today === periodReminderStr && shouldNotify("periodReminder")) {
-    sendNotification("Period Reminder", "Your period may start in 2 days.");
-  }
+      const stored =
+        localStorage.getItem(key);
 
-  if (today === ovulation && shouldNotify("ovulationDay")) {
-    sendNotification("Ovulation Day", "Today is your ovulation day.");
-  }
+      if (stored === today) {
+        return false;
+      }
 
-  if (today === fertileStart && shouldNotify("fertileStart")) {
-    sendNotification("Fertile Window", "Your fertile window starts today.");
-  }
-}
+      localStorage.setItem(key, today);
 
-// =====================
-// 🔁 LOG NEW CYCLE
-// =====================
+      return true;
 
-async function logNewCycle() {
-  const date = prompt("Enter new period start date (YYYY-MM-DD)");
-  if (!date) return;
+    }
 
-  const token = localStorage.getItem("token");
+    // =====================
+    // 📊 LOAD DASHBOARD
+    // =====================
 
-  const res = await fetch("/log-cycle", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer " + token
-    },
-    body: JSON.stringify({ newStartDate: date })
-  });
+    async function loadDashboard() {
 
-  const data = await res.json();
+      const token =
+        localStorage.getItem("token");
 
-  alert(data.message + " | New Cycle Length: " + data.newCycleLength);
+      if (!token) {
 
-  location.reload();
-}
+        window.location.href = "/login";
+        return;
 
-loadDashboard();
-</script>
+      }
+
+      await requestNotificationPermission();
+
+      const res = await fetch("/dashboard", {
+
+        headers: {
+          "Authorization": "Bearer " + token
+        }
+
+      });
+
+      const data = await res.json();
+
+      if (data.error) {
+
+        localStorage.removeItem("token");
+
+        window.location.href = "/login";
+
+        return;
+
+      }
+
+      // =====================
+      // 🔥 INSIGHTS
+      // =====================
+
+      const insightsDiv =
+        document.getElementById("insights");
+
+      insightsDiv.innerHTML = `
+
+        <div class="card">
+          <h3>Next Period</h3>
+          <p>${data.insights.nextPeriod}</p>
+        </div>
+
+        <div class="card">
+          <h3>Ovulation</h3>
+          <p>${data.insights.ovulation}</p>
+        </div>
+
+        <div class="card">
+          <h3>Fertile Window</h3>
+          <p>
+            ${data.insights.fertileStart}
+            →
+            ${data.insights.fertileEnd}
+          </p>
+        </div>
+
+      `;
+
+      // =====================
+      // 🗓 MONTH TITLE
+      // =====================
+
+      const monthTitle =
+        document.getElementById("monthTitle");
+
+      const start =
+        new Date(data.cycle[0].date);
+
+      const end =
+        new Date(
+          data.cycle[data.cycle.length - 1].date
+        );
+
+      const options = {
+
+        month: "short",
+        year: "numeric"
+
+      };
+
+      monthTitle.innerText =
+
+        start.toLocaleDateString(
+          undefined,
+          options
+        )
+
+        +
+
+        " - "
+
+        +
+
+        end.toLocaleDateString(
+          undefined,
+          options
+        );
+
+      // =====================
+      // 📅 CALENDAR
+      // =====================
+
+      const calendar =
+        document.getElementById("calendar");
+
+      calendar.innerHTML = "";
+
+      const today =
+        new Date().toISOString().split("T")[0];
+
+      const firstDay =
+        new Date(data.cycle[0].date).getDay();
+
+      for (let i = 0; i < firstDay; i++) {
+
+        const empty =
+          document.createElement("div");
+
+        empty.className = "day empty";
+
+        calendar.appendChild(empty);
+
+      }
+
+      data.cycle.forEach(day => {
+
+        const div =
+          document.createElement("div");
+
+        div.className =
+          "day " + day.phase;
+
+        if (day.date === today) {
+          div.classList.add("today");
+        }
+
+        div.innerHTML = `
+
+          <strong>
+            ${day.date.split("-")[2]}
+          </strong>
+
+          <br>
+
+          ${day.phase}
+
+        `;
+
+        calendar.appendChild(div);
+
+      });
+
+      // =====================
+      // 🧠 GUIDANCE
+      // =====================
+
+      const guidanceDiv =
+        document.getElementById("guidance");
+
+      if (data.guidance) {
+
+        guidanceDiv.innerHTML = `
+
+          <h2>
+            Today's Guidance
+          </h2>
+
+          <p>
+            <strong>Diet:</strong>
+
+            ${data.guidance.diet.join(", ")}
+          </p>
+
+          <p>
+            <strong>Yoga:</strong>
+
+            ${data.guidance.yoga.join(", ")}
+          </p>
+
+          <p>
+            <strong>Exercise:</strong>
+
+            ${data.guidance.exercise}
+          </p>
+
+        `;
+
+      }
+
+      // =====================
+      // 🔔 NOTIFICATION LOGIC
+      // =====================
+
+      const nextPeriod =
+        data.insights.nextPeriod;
+
+      const ovulation =
+        data.insights.ovulation;
+
+      const fertileStart =
+        data.insights.fertileStart;
+
+      const periodReminder =
+        new Date(nextPeriod);
+
+      periodReminder.setDate(
+        periodReminder.getDate() - 2
+      );
+
+      const periodReminderStr =
+        periodReminder
+        .toISOString()
+        .split("T")[0];
+
+      if (
+        today === periodReminderStr &&
+        shouldNotify("periodReminder")
+      ) {
+
+        sendNotification(
+          "Period Reminder",
+          "Your period may start in 2 days."
+        );
+
+      }
+
+      if (
+        today === ovulation &&
+        shouldNotify("ovulationDay")
+      ) {
+
+        sendNotification(
+          "Ovulation Day",
+          "Today is your ovulation day."
+        );
+
+      }
+
+      if (
+        today === fertileStart &&
+        shouldNotify("fertileStart")
+      ) {
+
+        sendNotification(
+          "Fertile Window",
+          "Your fertile window starts today."
+        );
+
+      }
+
+    }
+
+    // =====================
+    // 🔁 LOG NEW CYCLE
+    // =====================
+
+    async function logNewCycle() {
+
+      const date = prompt(
+        "Enter new period start date (YYYY-MM-DD)"
+      );
+
+      if (!date) return;
+
+      const token =
+        localStorage.getItem("token");
+
+      const res = await fetch(
+        "/log-cycle",
+        {
+
+          method: "POST",
+
+          headers: {
+
+            "Content-Type":
+              "application/json",
+
+            "Authorization":
+              "Bearer " + token
+
+          },
+
+          body: JSON.stringify({
+
+            newStartDate: date
+
+          })
+
+        }
+      );
+
+      const data = await res.json();
+
+      alert(
+        data.message +
+        " | New Cycle Length: " +
+        data.newCycleLength
+      );
+
+      location.reload();
+
+    }
+
+    loadDashboard();
+
+  </script>
 
 </body>
 </html>

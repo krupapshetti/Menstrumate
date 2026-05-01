@@ -7,15 +7,15 @@ const path = require("path");
 
 const User = require("./models/User");
 
-// ROUTES
+// ROUTES (kept from second file because they don't exist in first)
 const cartRoutes = require("./routes/cart");
 const paymentRoutes = require("./routes/payment");
 const dietRoutes = require("./routes/diet");
 
 const app = express();
 
-// SECRET
-const SECRET = process.env.JWT_SECRET || "mysecretkey";
+// 🔐 Secret key (kept from FIRST file)
+const SECRET = "mysecretkey";
 
 // ======================
 // ✅ MIDDLEWARE
@@ -23,8 +23,8 @@ const SECRET = process.env.JWT_SECRET || "mysecretkey";
 app.use(cors());
 app.use(express.json());
 
-// ✅ STATIC FILES (VERY IMPORTANT)
-app.use(express.static(path.join(__dirname, "public")));
+// kept FIRST version
+app.use(express.static("public"));
 
 // ======================
 // ✅ API ROUTES
@@ -57,10 +57,13 @@ function authMiddleware(req, res, next) {
 // ======================
 // 📄 PAGE ROUTES
 // ======================
-app.get("/", (req, res) => {
+
+// added from second file
+app.get("/shop", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "shop.html"));
 });
 
+// kept from FIRST file
 app.get("/signup", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "signup.html"));
 });
@@ -73,6 +76,12 @@ app.get("/dashboard-page", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
+// kept from FIRST file
+app.get("/guidance", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "guidance.html"));
+});
+
+// added from second file
 app.get("/cart-page", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "cart.html"));
 });
@@ -85,14 +94,107 @@ mongoose.connect("mongodb://127.0.0.1:27017/menstrualApp")
   .catch(err => console.log(err));
 
 // ======================
+// 🧠 CYCLE LOGIC
+// ======================
+
+// kept FIRST version
+function calculateCyclePhases(lastPeriod, cycleLength) {
+  const startDate = new Date(lastPeriod);
+  const days = [];
+
+  for (let i = 1; i <= cycleLength; i++) {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + (i - 1));
+
+    let phase = "";
+
+    if (i >= 1 && i <= 6) phase = "Menstruation";
+    else if (i >= 7 && i <= (cycleLength - 17)) phase = "Follicular";
+    else if (i >= (cycleLength - 16) && i <= (cycleLength - 14)) phase = "Ovulation";
+    else phase = "Luteal";
+
+    days.push({
+      day: i,
+      date: date.toISOString().split("T")[0],
+      phase
+    });
+  }
+
+  return days;
+}
+
+// kept from FIRST file
+function calculateInsights(lastPeriod, cycleLength) {
+  const start = new Date(lastPeriod);
+
+  const ovulationDay = cycleLength - 14;
+
+  const ovulationDate = new Date(start);
+  ovulationDate.setDate(start.getDate() + ovulationDay - 1);
+
+  const fertileStart = new Date(ovulationDate);
+  fertileStart.setDate(ovulationDate.getDate() - 5);
+
+  const fertileEnd = new Date(ovulationDate);
+
+  const nextPeriod = new Date(start);
+  nextPeriod.setDate(start.getDate() + cycleLength);
+
+  return {
+    nextPeriod: nextPeriod.toISOString().split("T")[0],
+    ovulation: ovulationDate.toISOString().split("T")[0],
+    fertileStart: fertileStart.toISOString().split("T")[0],
+    fertileEnd: fertileEnd.toISOString().split("T")[0]
+  };
+}
+
+// kept from FIRST file
+function updateCycleLength(oldCycle, previousCycle) {
+  return Math.round((4 * oldCycle + previousCycle) / 5);
+}
+
+// kept FIRST version
+function getPhaseGuidance(phase) {
+  const data = {
+    Menstruation: {
+      diet: ["Spinach", "Lentils", "Herbal tea"],
+      yoga: ["Child Pose", "Cat-Cow"],
+      exercise: "Light walking only"
+    },
+    Follicular: {
+      diet: ["Fruits", "Protein foods"],
+      yoga: ["Sun Salutation"],
+      exercise: "Cardio + gym"
+    },
+    Ovulation: {
+      diet: ["Fruits", "Nuts"],
+      yoga: ["Power yoga"],
+      exercise: "HIIT + strength training"
+    },
+    Luteal: {
+      diet: ["Oats", "Bananas"],
+      yoga: ["Meditation"],
+      exercise: "Moderate workouts"
+    }
+  };
+
+  return data[phase];
+}
+
+// ======================
 // 📝 SIGNUP
 // ======================
 app.post("/signup", async (req, res) => {
   try {
     const {
-      name, username, password,
-      age, weight, height,
-      cycleLength, lastPeriod
+      name,
+      username,
+      password,
+      age,
+      weight,
+      height,
+      cycleLength,
+      lastPeriod
     } = req.body;
 
     if (cycleLength < 20 || cycleLength > 40) {
@@ -117,7 +219,10 @@ app.post("/signup", async (req, res) => {
     res.json({ message: "User created successfully" });
 
   } catch (err) {
-    res.status(500).json({ error: "User already exists or error occurred" });
+    console.error(err);
+    res.status(500).json({
+      error: "User already exists or error occurred"
+    });
   }
 });
 
@@ -129,10 +234,19 @@ app.post("/login", async (req, res) => {
     const { username, password } = req.body;
 
     const user = await User.findOne({ username });
-    if (!user) return res.json({ error: "User not found" });
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.json({ error: "Wrong password" });
+    if (!user) {
+      return res.json({ error: "User not found" });
+    }
+
+    const isMatch = await bcrypt.compare(
+      password,
+      user.password
+    );
+
+    if (!isMatch) {
+      return res.json({ error: "Wrong password" });
+    }
 
     const token = jwt.sign(
       { id: user._id },
@@ -142,7 +256,7 @@ app.post("/login", async (req, res) => {
 
     res.json({ token });
 
-  } catch {
+  } catch (err) {
     res.status(500).json({ error: "Login error" });
   }
 });
@@ -159,17 +273,78 @@ app.get("/dashboard", authMiddleware, async (req, res) => {
       user.cycleLength
     );
 
-    const today = new Date().toISOString().split("T")[0];
-    const todayData = cycleData.find(d => d.date === today);
+    // kept from FIRST file
+    const insights = calculateInsights(
+      user.lastPeriod,
+      user.cycleLength
+    );
+
+    const today = new Date()
+      .toISOString()
+      .split("T")[0];
+
+    const todayData = cycleData.find(
+      d => d.date === today
+    );
+
+    const guidance = todayData
+      ? getPhaseGuidance(todayData.phase)
+      : null;
 
     res.json({
       user,
       cycle: cycleData,
-      guidance: todayData ? getPhaseGuidance(todayData.phase) : null
+      insights,
+      guidance
     });
 
-  } catch {
-    res.status(500).json({ error: "Error loading dashboard" });
+  } catch (err) {
+    res.status(500).json({
+      error: "Error loading dashboard"
+    });
+  }
+});
+
+// ======================
+// 🩸 LOG CYCLE
+// ======================
+app.post("/log-cycle", authMiddleware, async (req, res) => {
+  try {
+    const { newStartDate } = req.body;
+
+    const user = await User.findById(req.user.id);
+
+    const lastDate = new Date(user.lastPeriod);
+    const newDate = new Date(newStartDate);
+
+    const diffDays = Math.round(
+      (newDate - lastDate) /
+      (1000 * 60 * 60 * 24)
+    );
+
+    user.cycleHistory.push({
+      cycleLength: diffDays,
+      startDate: newDate
+    });
+
+    user.cycleLength = updateCycleLength(
+      user.cycleLength,
+      diffDays
+    );
+
+    user.lastPeriod = newDate;
+
+    await user.save();
+
+    res.json({
+      message: "Cycle updated",
+      newCycleLength: user.cycleLength
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      error: "Error updating cycle"
+    });
   }
 });
 
@@ -177,41 +352,7 @@ app.get("/dashboard", authMiddleware, async (req, res) => {
 // 🚀 START SERVER
 // ======================
 app.listen(3000, () => {
-  console.log("Server running on http://localhost:3000");
+  console.log(
+    "Server running on http://localhost:3000"
+  );
 });
-
-// ======================
-// 📊 HELPERS
-// ======================
-function calculateCyclePhases(lastPeriod, cycleLength) {
-  const startDate = new Date(lastPeriod);
-  const days = [];
-
-  for (let i = 1; i <= cycleLength; i++) {
-    const date = new Date(startDate);
-    date.setDate(startDate.getDate() + (i - 1));
-
-    let phase = "";
-    if (i <= 6) phase = "Menstruation";
-    else if (i <= cycleLength - 17) phase = "Follicular";
-    else if (i <= cycleLength - 14) phase = "Ovulation";
-    else phase = "Luteal";
-
-    days.push({
-      day: i,
-      date: date.toISOString().split("T")[0],
-      phase
-    });
-  }
-
-  return days;
-}
-
-function getPhaseGuidance(phase) {
-  return {
-    Menstruation: { diet: ["Spinach", "Tea"], exercise: "Rest" },
-    Follicular: { diet: ["Fruits"], exercise: "Light workout" },
-    Ovulation: { diet: ["Nuts"], exercise: "Intense workout" },
-    Luteal: { diet: ["Bananas"], exercise: "Moderate workout" }
-  }[phase];
-}
