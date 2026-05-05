@@ -9,7 +9,7 @@ function symptomsApi(path, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${symptomsToken}`,
+      Authorization: `Bearer ${localStorage.getItem("menstrumateToken")}`, // ✅ dynamic
       ...(options.headers || {})
     }
   }).then(async (res) => {
@@ -32,12 +32,12 @@ function today() {
 }
 
 async function initSymptoms() {
-  if (!symptomsToken) {
+  if (!localStorage.getItem("menstrumateToken")){
     window.location.href = "/";
     return;
   }
   try {
-    const me = await symptomsApi("/api/me");
+    const me = await symptomsApi("/api/auth/me");
     if (me.account.role !== "user") {
       window.location.href = "/";
       return;
@@ -153,7 +153,6 @@ async function saveSymptoms(event) {
     await symptomsApi("/api/symptoms", {
       method: "POST",
       body: JSON.stringify({
-        userId: currentUser.id,
         date: document.getElementById("symptomDate").value,
         symptoms: checked,
         painLevel: document.getElementById("painLevel").value,
@@ -165,8 +164,11 @@ async function saveSymptoms(event) {
     message.textContent = "Symptoms saved.";
     await loadHistory();
     if (onboardingMode || currentUser?.isFirstLogin) {
-      currentUser.isFirstLogin = false;
-      window.location.href = "/#dashboard";
+      await symptomsApi("/api/auth/complete-onboarding", {
+  method: "PATCH"
+});
+
+window.location.href = "/#dashboard";
     }
   } catch (err) {
     message.className = "notice error";

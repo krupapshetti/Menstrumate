@@ -71,6 +71,13 @@ async function initDoctorDashboard() {
       return;
     }
     doctorState.account = me.account;
+    
+    // Set doctor online status
+    await doctorApi("/api/doctor/status", {
+      method: "POST",
+      body: JSON.stringify({ isOnline: true })
+    });
+    
     renderShell();
     await loadPatients();
   } catch {
@@ -324,7 +331,10 @@ async function markDoctorChatSeen() {
   if (!doctorState.activeChat) return;
   await doctorApi("/api/chat/seen", {
     method: "POST",
-    body: JSON.stringify({ userId: doctorState.activeChat.userId })
+    body: JSON.stringify({ 
+      doctorId: doctorState.account.id,
+      userId: doctorState.activeChat.userId 
+    })
   }).catch(() => {});
 }
 
@@ -424,7 +434,7 @@ function renderPatientRows() {
   const rows = filteredPatients();
   document.getElementById("patientRows").innerHTML = rows.length ? rows.map((patient) => `
     <tr>
-      <td><strong>${safe(patient.name)}</strong></td>
+      <td><strong>${safe(patient.name)}</strong>电子
       <td>${safe(patient.email)}</td>
       <td>${safe(patient.condition)}</td>
       <td>${formatDate(patient.lastActivity)}</td>
