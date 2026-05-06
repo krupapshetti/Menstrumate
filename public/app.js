@@ -322,7 +322,7 @@ if (
 async function loadView() {
   const loaders = {
     dashboard: renderDashboard,
-    symptoms: renderSymptomsLink,
+    symptoms: renderSymptoms,  // ← CHANGE THIS LINE
     shop: renderShop,
     cart: renderCart,
     diet: renderDiet,
@@ -331,11 +331,163 @@ async function loadView() {
     profile: renderProfile,
     education: renderEducation
   };
-  await loaders[state.view]();
+  
+  if (loaders[state.view]) {
+    await loaders[state.view]();
+  } else {
+    console.error(`Unknown view: ${state.view}`);
+    await renderDashboard();
+  }
 }
 
+// Keep this function for any external links that need to redirect to symptoms.html
 async function renderSymptomsLink() {
   window.location.href = "/symptoms.html";
+}
+
+// ========== NEW: Complete Symptoms Function for SPA ==========
+async function renderSymptoms() {
+  setTitle("Log Symptoms", "Track your daily symptoms, pain levels, and share with your doctor.");
+  const view = document.getElementById("view");
+  
+  // Get today's date
+  const today = new Date().toISOString().slice(0, 10);
+  
+  try {
+    // Fetch existing symptoms to check if already logged today
+    const symptomData = await api(`/api/symptoms?_=${Date.now()}`).catch(() => ({ data: { symptoms: [] } }));
+    const symptoms = symptomData?.data?.symptoms || symptomData?.symptoms || [];
+    const todaySymptoms = symptoms.find(s => s.date === today);
+    
+    // Symptom options
+    const symptomOptions = ["Cramps", "Bloating", "Headache", "Fatigue", "Mood swings", 
+      "Breast tenderness", "Nausea", "Back pain", "Acne", "Food cravings"];
+    
+    view.innerHTML = `
+      <div class="panel">
+        <form id="symptomsForm" class="form-grid">
+          <h3>${todaySymptoms ? "Update Today's Symptoms" : "Log Today's Symptoms"}</h3>
+          <p class="muted">Date: ${today}</p>
+          
+          <label class="field full">
+            <span>Symptoms (select all that apply)</span>
+            <div class="symptom-checkboxes">
+              ${symptomOptions.map(option => `
+                <label>
+                  <input type="checkbox" name="symptoms" value="${option}" 
+                    ${todaySymptoms?.symptoms?.includes(option) ? 'checked' : ''}>
+                  ${option}
+                </label>
+              `).join("")}
+            </div>
+          </label>
+          
+          <label class="field">
+            <span>Pain Level (0-10)</span>
+            <input type="range" id="painLevel" min="0" max="10" value="${todaySymptoms?.painLevel || 0}">
+            <span id="painValueDisplay">${todaySymptoms?.painLevel || 0}</span>
+          </label>
+          
+          <label class="field full">
+            <span>Notes</span>
+            <textarea id="notes" rows="3" placeholder="Additional notes...">${todaySymptoms?.notes || ''}</textarea>
+          </label>
+          
+          <label class="field">
+            <span>Share with doctor</span>
+            <input type="checkbox" id="shareWithDoctor" ${todaySymptoms?.sharedWithDoctor ? 'checked' : ''}>
+          </label>
+          
+          <div class="btn-row">
+            <button type="submit" class="btn">${todaySymptoms ? "Update Symptoms" : "Save Symptoms"}</button>
+            <button type="button" id="backToDashboardBtn" class="btn secondary">Back to Dashboard</button>
+          </div>
+          
+          <div id="symptomsMessage"></div>
+        </form>
+      </div>
+    `;
+    
+    // Pain level display
+    const painSlider = document.getElementById("painLevel");
+    const painDisplay = document.getElementById("painValueDisplay");
+    painSlider.addEventListener("input", () => {
+      painDisplay.textContent = painSlider.value;
+    });
+    
+    // Handle form submission - simplified version
+    document.getElementById("symptomsForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      
+      const selectedSymptoms = Array.from(document.querySelectorAll('input[name="symptoms"]:checked'))
+        .map(cb => cb.value);
+      
+      const symptomDataToSave = {
+        date: today,
+        symptoms: selectedSymptoms,
+        painLevel: parseInt(document.getElementById("painLevel").value),
+        notes: document.getElementById("notes").value,
+        sharedWithDoctor: document.getElementById("shareWithDoctor").checked
+      };
+      
+      const messageBox = document.getElementById("symptomsMessage");
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      const originalText = submitBtn.textContent;
+      
+      submitBtn.textContent = "Saving...";
+      submitBtn.disabled = true;
+      
+      try {
+        // If there's an existing symptom for today, delete it first
+        if (todaySymptoms) {
+          const symptomId = todaySymptoms.symptomId || todaySymptoms.id;
+          try {
+            await api(`/api/symptoms/${symptomId}`, {
+              method: "DELETE"
+            });
+            console.log("Deleted existing symptom entry");
+          } catch (deleteErr) {
+            console.log("No existing entry to delete or delete failed:", deleteErr);
+          }
+        }
+        
+        // Always create new with POST
+        await api("/api/symptoms", {
+          method: "POST",
+          body: JSON.stringify(symptomDataToSave)
+        });
+        
+        messageBox.className = "notice";
+        messageBox.textContent = "✅ Symptoms saved successfully!";
+        
+        // Set flag to notify dashboard to refresh
+        localStorage.setItem('menstrumateSymptomsUpdated', Date.now().toString());
+        
+        // Redirect back to dashboard after 1.5 seconds
+        setTimeout(() => {
+          state.view = "dashboard";
+          renderApp();
+        }, 1500);
+        
+      } catch (err) {
+        messageBox.className = "notice error";
+        messageBox.textContent = `❌ Failed to save symptoms: ${err.message}`;
+        console.error("Symptom save error:", err);
+        submitBtn.textContent = originalText;
+        submitBtn.disabled = false;
+      }
+    });
+    
+    // Handle back button
+    document.getElementById("backToDashboardBtn").addEventListener("click", () => {
+      state.view = "dashboard";
+      renderApp();
+    });
+    
+  } catch (error) {
+    console.error("Error loading symptoms:", error);
+    view.innerHTML = `<div class="panel error">Failed to load symptoms page: ${error.message}</div>`;
+  }
 }
 
 function setTitle(title, subtitle) {
@@ -381,41 +533,95 @@ function maybeShowDailyCheckin(latestSymptom) {
     document.getElementById("checkinModal")?.remove();
   };
   document.getElementById("goCheckin").addEventListener("click", () => {
-    window.location.href = "/symptoms.html";
+    state.view = "symptoms";
+    renderSymptoms();
+    close();
   });
   document.getElementById("skipCheckin").addEventListener("click", close);
   document.getElementById("dismissCheckin").addEventListener("click", close);
 }
 
 async function renderDashboard() {
+  console.log("🔄 Rendering dashboard with fresh data...");
   setTitle("Dashboard", "Personalized predictions, insights, and live account data.");
   const view = document.getElementById("view");
+  
   if (state.role === "doctor") {
     view.innerHTML = `<div class="panel"><h3>Doctor profile is active</h3><p class="muted">Users can now see your profile in their doctor list.</p></div>`;
     return;
   }
   
+  // Check for symptom updates from localStorage
+  const symptomsUpdated = localStorage.getItem('menstrumateSymptomsUpdated');
+  if (symptomsUpdated) {
+    console.log("🔄 Symptoms were just updated, clearing cache...");
+    localStorage.removeItem('menstrumateSymptomsUpdated');
+  }
+  
+  // Check for first login and redirect to symptoms
+  if (state.account?.isFirstLogin) {
+    console.log("🔄 First login detected, redirecting to symptoms onboarding");
+    state.account.isFirstLogin = false;
+    await renderSymptoms();
+    return;
+  }
+  
   try {
+    // Add cache-busting timestamp to ALL API calls
+    const timestamp = Date.now();
+    
+    // First, get the user's current cycle data from the database
+    const userData = await api(`/api/auth/me?_=${timestamp}`);
+    if (userData.account) {
+      state.account.cycleLength = userData.account.cycleLength;
+      state.account.lastPeriod = userData.account.lastPeriod;
+    }
+    
     const [cycleData, notices, symptomData, analyticsData, insightData] = await Promise.all([
-      api("/api/cycle").catch(err => ({ insights: {}, cycle: [], expectedSymptoms: [], recommendedActions: [] })),
-      api("/api/notifications").catch(err => ({ messages: [] })),
-      api("/api/symptoms").catch(err => ({ symptoms: [] })),
-      api(`/api/cycle/analytics/${state.account.id}`).catch(err => ({ analytics: { painTrend: [], frequency: [] } })),
+      api(`/api/cycle?_=${timestamp}`).catch(err => {
+        console.error("Cycle API error:", err);
+        return { insights: {}, cycle: [], expectedSymptoms: [], recommendedActions: [] };
+      }),
+      api(`/api/notifications?_=${timestamp}`).catch(err => {
+        console.error("Notifications API error:", err);
+        return { messages: [] };
+      }),
+      api(`/api/symptoms?_=${timestamp}`).catch(err => {
+        console.error("Symptoms API error:", err);
+        return { data: { symptoms: [] } };
+      }),
+      api(`/api/cycle/analytics/${state.account.id}?_=${timestamp}`).catch(err => {
+        console.error("Analytics API error:", err);
+        return { analytics: { painTrend: [], frequency: [] } };
+      }),
       api("/api/cycle/insights", {
         method: "POST",
         body: JSON.stringify({})
-      }).catch(err => ({ insights: [] }))
+      }).catch(err => {
+        console.error("Insights API error:", err);
+        return { insights: [] };
+      })
     ]);
+    
+    console.log("✅ Dashboard data loaded successfully");
+    console.log("📊 Cycle data:", cycleData);
+    console.log("📊 User cycle length from account:", state.account.cycleLength);
+    
+    // Handle different response structures
+    const symptoms = symptomData?.data?.symptoms || symptomData?.symptoms || [];
+    const latestSymptom = symptoms.length > 0 ? symptoms[0] : null;
     
     // Safely access nested properties with defaults
     const insights = cycleData?.insights || { nextPeriod: 'N/A', ovulation: 'N/A', todayPhase: 'Unknown', predictionConfidence: 0, irregularCycle: false };
     const cycle = cycleData?.cycle || [];
-    const latestSymptom = symptomData?.symptoms?.[0];
     const analytics = analyticsData?.analytics || { painTrend: [], frequency: [] };
     const noticesMessages = notices?.messages || [];
     const expectedSymptoms = cycleData?.expectedSymptoms || [];
     const recommendedActions = cycleData?.recommendedActions || [];
     const insightList = insightData?.insights || [];
+    
+    // Get the last period date from cycle data or user account
+    const lastPeriodDate = cycle[0]?.date || state.account.lastPeriod || '';
     
     view.innerHTML = `
       <div class="grid premium-metrics">
@@ -425,28 +631,37 @@ async function renderDashboard() {
         <div class="panel metric glass-card"><span class="muted">Confidence</span><strong>${escapeHtml(insights.predictionConfidence)}%</strong></div>
       </div>
       ${insights.irregularCycle ? `<div class="notice error">Irregular cycle pattern detected. Prediction confidence is adjusted from your past cycle history.</div>` : ""}
+      
       <div class="grid" style="margin-top:16px">
         <div class="panel">
           <h3>Expected Symptoms</h3>
-          ${renderFrequencyBadges(expectedSymptoms.map((symptom) => ({ symptom, count: "phase" })))}
+          ${expectedSymptoms.length ? renderFrequencyBadges(expectedSymptoms.map((symptom) => ({ symptom, count: "phase" }))) : '<p class="muted">No expected symptoms for this phase.</p>'}
         </div>
         <div class="panel">
           <h3>Recommended Actions</h3>
-          ${recommendedActions.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
+          ${recommendedActions.length ? recommendedActions.map((item) => `<p>${escapeHtml(item)}</p>`).join("") : '<p class="muted">No recommendations at this time.</p>'}
         </div>
       </div>
+      
       <div class="panel flow-panel" style="margin-top:16px">
         <h3>Period Alert Setup</h3>
+        <div id="cycleMessage" class="notice" style="display:none; margin-bottom:16px"></div>
         <form id="cycleForm" class="form-grid">
-          <label class="field"><span>Last Period Start</span><input id="cycleDate" type="date" value="${cycle[0]?.date || ''}" required></label>
-          <label class="field"><span>Cycle Length</span><input id="cycleLength" type="number" min="20" max="40" value="${cycle.length || 28}" required></label>
-          <div class="field"><span>&nbsp;</span><button class="btn">Save Cycle</button></div>
+          <label class="field"><span>Last Period Start</span>
+            <input id="cycleDate" type="date" value="${lastPeriodDate}" required>
+          </label>
+          <label class="field"><span>Cycle Length (days)</span>
+            <input id="cycleLength" type="number" min="20" max="40" value="${state.account.cycleLength || 28}" required>
+          </label>
+          <div class="field"><span>&nbsp;</span><button class="btn" id="saveCycleBtn">Save Cycle Settings</button></div>
         </form>
       </div>
+      
       <div class="panel reminders-panel" style="margin-top:16px">
         <h3>Smart Reminders</h3>
-        ${noticesMessages.map((msg) => `<p>${escapeHtml(msg)}</p>`).join("")}
+        ${noticesMessages.length ? noticesMessages.map((msg) => `<p>${escapeHtml(msg)}</p>`).join("") : '<p class="muted">No reminders at this time.</p>'}
       </div>
+      
       <div class="panel" style="margin-top:16px">
         <h3>Today's Symptoms</h3>
         ${latestSymptom ? `
@@ -454,11 +669,22 @@ async function renderDashboard() {
           <p><strong>${(latestSymptom.symptoms || []).map(escapeHtml).join(", ")}</strong></p>
           <p>Pain level: <strong>${escapeHtml(latestSymptom.painLevel)}/10</strong></p>
           ${latestSymptom.notes ? `<p>${escapeHtml(latestSymptom.notes)}</p>` : ""}
-        ` : `<p class="muted">No symptoms logged yet.</p>`}
+          <div class="btn-row">
+            <button class="btn secondary" id="updateSymptomsBtn">Update Today's Symptoms</button>
+            <button class="btn secondary" id="refreshDashboardBtn">Refresh Dashboard</button>
+          </div>
+        ` : `
+          <p class="muted">No symptoms logged today.</p>
+          <div class="btn-row">
+            <button class="btn" id="logSymptomsBtn">Log Symptoms</button>
+            <button class="btn secondary" id="refreshDashboardBtn">Refresh Dashboard</button>
+          </div>
+        `}
       </div>
+      
       <div class="grid" style="margin-top:16px">
         <div class="panel">
-          <h3>Pain Trend</h3>
+          <h3>Pain Trend (Last 14 Days)</h3>
           ${renderPainBars(analytics.painTrend)}
         </div>
         <div class="panel">
@@ -466,36 +692,154 @@ async function renderDashboard() {
           ${renderFrequencyBadges(analytics.frequency)}
         </div>
       </div>
+      
       <div class="panel" style="margin-top:16px">
         <h3>AI Insights</h3>
         <div class="grid">
-          ${insightList.map((item) => `
+          ${insightList.length ? insightList.map((item) => `
             <article class="diet-day">
               <strong>${escapeHtml(item.title)}</strong>
               <span>${escapeHtml(item.message)}</span>
               <span class="muted">${escapeHtml(item.action)}</span>
             </article>
-          `).join("")}
+          `).join("") : '<p class="muted">No insights available yet. Log more symptoms for personalized insights.</p>'}
         </div>
       </div>
+      
       <div class="panel calendar-panel" style="margin-top:16px">
         <h3>Cycle Calendar</h3>
-        <div class="calendar">${Array.isArray(cycle) && cycle.length ? cycle.map((day) => `<div class="day ${day.phase}"><strong>Day ${day.day}</strong><br>${day.date}<br>${day.phase}</div>`).join("") : '<p>No cycle data available</p>'}</div>
+        <div class="calendar">${Array.isArray(cycle) && cycle.length ? cycle.map((day) => `<div class="day ${day.phase}"><strong>Day ${day.day}</strong><br>${day.date}<br>${day.phase}</div>`).join("") : '<p>No cycle data available. Please set your last period date above.</p>'}</div>
       </div>
     `;
     
-    document.getElementById("cycleForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      await api("/api/cycle", {
-        method: "POST",
-        body: JSON.stringify({
-          lastPeriod: document.getElementById("cycleDate").value,
-          cycleLength: document.getElementById("cycleLength").value
-        })
+    // Handle cycle form submission with proper error handling and refresh
+    const cycleForm = document.getElementById("cycleForm");
+    const saveCycleBtn = document.getElementById("saveCycleBtn");
+    const cycleDateInput = document.getElementById("cycleDate");
+    const cycleLengthInput = document.getElementById("cycleLength");
+    const cycleMessage = document.getElementById("cycleMessage");
+    
+    if (saveCycleBtn) {
+      saveCycleBtn.addEventListener("click", async (event) => {
+        event.preventDefault();
+        
+        const lastPeriod = cycleDateInput.value;
+        const cycleLength = parseInt(cycleLengthInput.value);
+        
+        if (!lastPeriod) {
+          showMessage("cycleMessage", "Please select your last period date", true);
+          return;
+        }
+        
+        if (isNaN(cycleLength) || cycleLength < 20 || cycleLength > 40) {
+          showMessage("cycleMessage", "Cycle length must be between 20 and 40 days", true);
+          return;
+        }
+        
+        // Show saving state
+        const originalText = saveCycleBtn.textContent;
+        saveCycleBtn.textContent = "Saving...";
+        saveCycleBtn.disabled = true;
+        
+        if (cycleMessage) {
+          cycleMessage.style.display = "block";
+          cycleMessage.className = "notice";
+          cycleMessage.textContent = "Saving cycle data...";
+        }
+        
+        try {
+          console.log("📝 Saving cycle data:", { lastPeriod, cycleLength });
+          
+          // Save to /api/cycle endpoint
+          const cycleResponse = await api("/api/cycle", {
+            method: "POST",
+            body: JSON.stringify({
+              lastPeriod: lastPeriod,
+              cycleLength: cycleLength
+            })
+          });
+          
+          console.log("✅ Cycle save response:", cycleResponse);
+          
+          // Also update user profile with cycle length
+          const profileResponse = await api("/api/profile", {
+            method: "PATCH",
+            body: JSON.stringify({
+              cycleLength: cycleLength,
+              lastPeriod: lastPeriod
+            })
+          }).catch(err => {
+            console.log("Profile update not available, continuing...");
+            return null;
+          });
+          
+          if (cycleMessage) {
+            cycleMessage.className = "notice";
+            cycleMessage.textContent = "✅ Cycle settings saved successfully! Refreshing dashboard...";
+          }
+          
+          // Update local state
+          if (state.account) {
+            state.account.cycleLength = cycleLength;
+            state.account.lastPeriod = lastPeriod;
+          }
+          
+          // Wait a moment then refresh the entire dashboard
+          setTimeout(async () => {
+            // Clear any cached data
+            localStorage.removeItem('menstrumateCycleUpdated');
+            localStorage.setItem('menstrumateCycleUpdated', Date.now().toString());
+            
+            // Force refresh the entire dashboard
+            await renderDashboard();
+          }, 1500);
+          
+        } catch (err) {
+          console.error("❌ Failed to save cycle:", err);
+          if (cycleMessage) {
+            cycleMessage.className = "notice error";
+            cycleMessage.textContent = `❌ Failed to save: ${err.message}`;
+            cycleMessage.style.display = "block";
+          }
+          saveCycleBtn.textContent = originalText;
+          saveCycleBtn.disabled = false;
+          
+          // Hide error after 3 seconds
+          setTimeout(() => {
+            if (cycleMessage) {
+              cycleMessage.style.display = "none";
+            }
+          }, 3000);
+        }
       });
-      await renderDashboard();
-    });
+    }
+    
+    // Handle symptom buttons
+    const logSymptomsBtn = document.getElementById("logSymptomsBtn");
+    if (logSymptomsBtn) {
+      logSymptomsBtn.addEventListener("click", async () => {
+        await renderSymptoms();
+      });
+    }
+    
+    const updateSymptomsBtn = document.getElementById("updateSymptomsBtn");
+    if (updateSymptomsBtn) {
+      updateSymptomsBtn.addEventListener("click", async () => {
+        await renderSymptoms();
+      });
+    }
+    
+    // Manual refresh button
+    const refreshBtn = document.getElementById("refreshDashboardBtn");
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", async () => {
+        console.log("🔄 Manual refresh triggered");
+        await renderDashboard();
+      });
+    }
+    
     maybeShowDailyCheckin(latestSymptom);
+    
   } catch (error) {
     console.error("Error rendering dashboard:", error);
     view.innerHTML = `<div class="panel error">Failed to load dashboard: ${error.message}</div>`;
@@ -515,17 +859,12 @@ async function getProductsAndCart() {
       })
     ]);
     
-    // Extract data from different response structures
     const productData = productResponse?.data || productResponse;
-    
-    // Cart response is directly { success, items, total, itemCount }
     const cartData = cartResponse;
     
-    // Always ensure these are arrays
     state.products = Array.isArray(productData?.products) ? productData.products : [];
     state.categories = Array.isArray(productData?.categories) ? productData.categories : [];
     
-    // Handle cart items - could be in cartData.items or cartData directly
     if (cartData && Array.isArray(cartData.items)) {
       state.cart = cartData.items;
     } else if (cartData && Array.isArray(cartData)) {
@@ -537,7 +876,6 @@ async function getProductsAndCart() {
     console.log("✅ Products loaded:", state.products.length);
     console.log("✅ Categories loaded:", state.categories);
     console.log("✅ Cart items loaded:", state.cart.length);
-    console.log("✅ Cart raw response:", cartData);
     
     return { products: state.products, cart: state.cart };
     
@@ -555,10 +893,8 @@ async function renderShop() {
   const view = document.getElementById("view");
   
   try {
-    // Show loading state
     view.innerHTML = `<div class="panel">Loading shop...</div>`;
     
-    // Load data with error handling
     const [productResponse, cartResponse] = await Promise.all([
       api("/api/products").catch(err => {
         console.error("Products API failed:", err);
@@ -570,10 +906,8 @@ async function renderShop() {
       })
     ]);
     
-    // Extract data from different response structures
     const productData = productResponse?.data || productResponse;
     
-    // Cart response structure fix
     let cartItems = [];
     if (cartResponse && Array.isArray(cartResponse.items)) {
       cartItems = cartResponse.items;
@@ -581,17 +915,10 @@ async function renderShop() {
       cartItems = cartResponse;
     }
     
-    // Safely assign with array checks
     state.products = Array.isArray(productData?.products) ? productData.products : [];
     state.categories = Array.isArray(productData?.categories) ? productData.categories : [];
     state.cart = cartItems;
     
-    // Debug log to verify
-    console.log("✅ Products loaded:", state.products.length);
-    console.log("✅ Categories loaded:", state.categories);
-    console.log("✅ Cart items loaded:", state.cart.length);
-    
-    // If no products, show helpful message
     if (state.products.length === 0) {
       view.innerHTML = `
         <div class="panel">
@@ -603,34 +930,23 @@ async function renderShop() {
       return;
     }
     
-    // Ensure categories is at least an empty array and has valid data
-    const safeCategories = Array.isArray(state.categories) && state.categories.length > 0 
-      ? state.categories 
-      : [];
-    
+    const safeCategories = Array.isArray(state.categories) && state.categories.length > 0 ? state.categories : [];
     const active = sessionStorage.getItem("category") || "All";
     
-    // Safe category options - handle empty categories case
     let categoryOptions = ["All"];
     if (safeCategories.length > 0) {
       categoryOptions = ["All", ...safeCategories];
     }
     
-    // Filter products safely
-    const products = active === "All" 
-      ? state.products 
-      : state.products.filter((product) => product?.category === active);
+    const products = active === "All" ? state.products : state.products.filter((product) => product?.category === active);
     
-    // Calculate cart count safely (handle different cart item structures)
     const cartCount = state.cart.reduce((sum, item) => {
       const qty = item?.quantity || (item?.product?.quantity) || 0;
       return sum + qty;
     }, 0);
     
-    // Get recommendations safely
     const recommendations = productData?.recommendations || [];
     
-    // Render the shop UI
     view.innerHTML = `
       ${recommendations.length > 0 ? `
         <div class="panel smart-shop-panel">
@@ -664,7 +980,6 @@ async function renderShop() {
       </div>
     `;
     
-    // Add event listeners with safety checks
     const categorySelect = document.getElementById("categorySelect");
     if (categorySelect) {
       categorySelect.addEventListener("change", (event) => {
@@ -681,7 +996,6 @@ async function renderShop() {
       });
     }
     
-    // ========== FIXED: Add to cart buttons ==========
     document.querySelectorAll("[data-add]").forEach((button) => {
       button.addEventListener("click", async () => {
         const originalText = button.textContent;
@@ -692,13 +1006,10 @@ async function renderShop() {
         button.disabled = true;
         
         try {
-          // Simple POST - backend handles incrementing quantity
-          const response = await api("/api/cart/items", { 
+          await api("/api/cart/items", { 
             method: "POST", 
             body: JSON.stringify({ productId, quantity: 1 }) 
           });
-          
-          console.log("Add to cart response:", response);
           
           button.textContent = "Added!";
           setTimeout(() => {
@@ -707,10 +1018,8 @@ async function renderShop() {
             button.disabled = false;
           }, 1500);
           
-          // Refresh cart data
           await getProductsAndCart();
           
-          // Update cart count in the shop header
           const updatedCartCount = state.cart.reduce((sum, item) => {
             const qty = item?.quantity || (item?.product?.quantity) || 0;
             return sum + qty;
@@ -761,15 +1070,12 @@ async function renderCart() {
       return;
     }
     
-    // Build rows with product details - handle different cart item structures
     const rows = state.cart
       .map((entry) => {
-        // Handle both { productId, quantity } and { productId, quantity, product } structures
         const productId = entry.productId;
         const quantity = entry.quantity;
         let product = null;
         
-        // Try to get product from entry.product or find in state.products
         if (entry.product) {
           product = entry.product;
         } else {
@@ -816,29 +1122,25 @@ async function renderCart() {
       </section>
     `;
     
-    // Increment quantity
     document.querySelectorAll("[data-inc]").forEach((button) => {
       button.addEventListener("click", async () => {
         const productId = button.dataset.inc;
         try {
-          const response = await api("/api/cart/items", { 
+          await api("/api/cart/items", { 
             method: "POST", 
             body: JSON.stringify({ productId, quantity: 1 }) 
           });
-          console.log("Increment response:", response);
-          await renderCart(); // Refresh cart view
+          await renderCart();
         } catch (err) {
           console.error("Failed to increment quantity:", err);
         }
       });
     });
     
-    // Decrement quantity
     document.querySelectorAll("[data-dec]").forEach((button) => {
       button.addEventListener("click", async () => {
         const productId = button.dataset.dec;
         try {
-          // First get current item to check quantity
           const cartResponse = await api("/api/cart");
           let cartItems = [];
           if (cartResponse && Array.isArray(cartResponse.items)) {
@@ -848,37 +1150,33 @@ async function renderCart() {
           const item = cartItems.find(i => i.productId === productId);
           
           if (item && item.quantity > 1) {
-            // Update with new quantity
             const newQuantity = item.quantity - 1;
             await api(`/api/cart/items/${productId}`, { 
               method: "PATCH", 
               body: JSON.stringify({ quantity: newQuantity }) 
             });
           } else {
-            // Remove item
             await api(`/api/cart/items/${productId}`, { method: "DELETE" });
           }
-          await renderCart(); // Refresh cart view
+          await renderCart();
         } catch (err) {
           console.error("Failed to decrement quantity:", err);
         }
       });
     });
     
-    // Remove item
     document.querySelectorAll("[data-remove]").forEach((button) => {
       button.addEventListener("click", async () => {
         const productId = button.dataset.remove;
         try {
           await api(`/api/cart/items/${productId}`, { method: "DELETE" });
-          await renderCart(); // Refresh cart view
+          await renderCart();
         } catch (err) {
           console.error("Failed to remove item:", err);
         }
       });
     });
     
-    // Checkout button
     const checkoutBtn = document.getElementById("checkoutBtn");
     if (checkoutBtn) {
       checkoutBtn.addEventListener("click", async () => {
@@ -949,36 +1247,46 @@ async function renderDiet() {
 
 async function renderYoga() {
   setTitle("Yoga + Exercise", "Guided poses with real visuals, instructions, and start-stop timers.");
-  const data = await api("/api/yoga");
-  state.yoga = data.yoga;
-  document.getElementById("view").innerHTML = `
-    <div class="grid yoga-grid">
-      ${data.yoga.map((pose) => `
-        <article class="yoga-card">
-          <button class="yoga-media-btn" data-open-pose="${pose.id}">
-            <img class="yoga-photo" src="${pose.image}" alt="${escapeHtml(pose.name)}">
-            <span>View Guide</span>
-          </button>
-          <h3>${escapeHtml(pose.name)}</h3>
-          <p class="muted">${escapeHtml(pose.instructions)}</p>
-          <strong data-timer-id="${pose.id}">${pose.duration}s</strong>
-          <div class="btn-row" style="margin-top:12px">
-            <button class="btn" data-start="${pose.id}" data-duration="${pose.duration}">Start</button>
-            <button class="btn secondary" data-stop="${pose.id}">Stop</button>
-          </div>
-        </article>
-      `).join("")}
-    </div>
-  `;
-  document.querySelectorAll("[data-start]").forEach((button) => {
-    button.addEventListener("click", () => startTimer(button.dataset.start, Number(button.dataset.duration)));
-  });
-  document.querySelectorAll("[data-stop]").forEach((button) => {
-    button.addEventListener("click", () => stopTimer(button.dataset.stop));
-  });
-  document.querySelectorAll("[data-open-pose]").forEach((button) => {
-    button.addEventListener("click", () => openYogaDetail(button.dataset.openPose));
-  });
+  
+  try {
+    // Use direct /api/yoga endpoint
+    const data = await api("/api/yoga");
+    state.yoga = data.yoga || [];
+    
+    document.getElementById("view").innerHTML = `
+      <div class="grid yoga-grid">
+        ${state.yoga.length ? state.yoga.map((pose) => `
+          <article class="yoga-card">
+            <button class="yoga-media-btn" data-open-pose="${pose.id}">
+              <img class="yoga-photo" src="${pose.image}" alt="${escapeHtml(pose.name)}">
+              <span>View Guide</span>
+            </button>
+            <h3>${escapeHtml(pose.name)}</h3>
+            <p class="muted">${escapeHtml(pose.instructions)}</p>
+            <strong data-timer-id="${pose.id}">${pose.duration}s</strong>
+            <div class="btn-row" style="margin-top:12px">
+              <button class="btn" data-start="${pose.id}" data-duration="${pose.duration}">Start</button>
+              <button class="btn secondary" data-stop="${pose.id}">Stop</button>
+            </div>
+          </article>
+        `).join("") : '<p class="muted">No yoga poses available.</p>'}
+      </div>
+    `;
+    
+    document.querySelectorAll("[data-start]").forEach((button) => {
+      button.addEventListener("click", () => startTimer(button.dataset.start, Number(button.dataset.duration)));
+    });
+    document.querySelectorAll("[data-stop]").forEach((button) => {
+      button.addEventListener("click", () => stopTimer(button.dataset.stop));
+    });
+    document.querySelectorAll("[data-open-pose]").forEach((button) => {
+      button.addEventListener("click", () => openYogaDetail(button.dataset.openPose));
+    });
+    
+  } catch (error) {
+    console.error("Error loading yoga:", error);
+    document.getElementById("view").innerHTML = `<div class="panel error">Failed to load yoga: ${error.message}</div>`;
+  }
 }
 
 function startTimer(id, duration) {
@@ -1067,36 +1375,48 @@ function startYogaStepFlow(totalSteps, duration) {
 
 async function renderDoctors() {
   setTitle("Doctors", "Choose a doctor and start a private saved chat.");
-  const data = await api("/api/doctors");
-  document.getElementById("view").innerHTML = `
-    <div class="doctor-directory">
-      ${data.doctors.length ? data.doctors.map((doctor) => `
-        <article class="doctor-profile-card">
-          <div class="doctor-avatar">${escapeHtml(doctor.initials || "DR")}</div>
-          <div class="doctor-profile-body">
-            <p class="muted">Menstrumate Doctor</p>
-            <span class="status-badge ${doctor.isOnline ? "online" : "offline"}">${doctor.isOnline ? "Online" : "Offline"}</span>
-            <h3>${escapeHtml(doctor.name)}</h3>
-            <p><strong>${escapeHtml(doctor.specialty || "Gynecology")}</strong></p>
-            <p class="muted">${escapeHtml(doctor.clinic || "Clinic not added")}</p>
-            <p class="doctor-email">${escapeHtml(doctor.email)}</p>
-          </div>
-          <div class="btn-row">
-            <button class="btn doctor-chat-btn" data-chat-doctor="${doctor.id}">Chat</button>
-            <button class="btn secondary" data-book-doctor="${doctor.id}" data-doctor-name="${escapeHtml(doctor.name)}">Schedule Appointment</button>
-          </div>
-        </article>
-      `).join("") : `<div class="panel">No doctors have signed up yet. Create a doctor account from the landing page to populate this list.</div>`}
-    </div>
-  `;
-  document.querySelectorAll("[data-chat-doctor]").forEach((button) => {
-    button.addEventListener("click", () => {
-      window.location.href = `/chat.html?doctorId=${encodeURIComponent(button.dataset.chatDoctor)}`;
+  
+  try {
+    // Use direct /api/doctors endpoint
+    const data = await api("/api/doctors");
+    const doctors = data.doctors || [];
+    
+    document.getElementById("view").innerHTML = `
+      <div class="doctor-directory">
+        ${doctors.length ? doctors.map((doctor) => `
+          <article class="doctor-profile-card">
+            <div class="doctor-avatar">${escapeHtml(doctor.initials || "DR")}</div>
+            <div class="doctor-profile-body">
+              <p class="muted">Menstrumate Doctor</p>
+              <span class="status-badge ${doctor.isOnline ? "online" : "offline"}">${doctor.isOnline ? "Online" : "Offline"}</span>
+              <h3>${escapeHtml(doctor.name)}</h3>
+              <p><strong>${escapeHtml(doctor.specialty || "Gynecology")}</strong></p>
+              <p class="muted">${escapeHtml(doctor.clinic || "Clinic not added")}</p>
+              <p class="doctor-email">${escapeHtml(doctor.email)}</p>
+            </div>
+            <div class="btn-row">
+              <button class="btn doctor-chat-btn" data-chat-doctor="${doctor.id}">Chat</button>
+              <button class="btn secondary" data-book-doctor="${doctor.id}" data-doctor-name="${escapeHtml(doctor.name)}">Schedule Appointment</button>
+            </div>
+          </article>
+        `).join("") : `<div class="panel">No doctors have signed up yet. Create a doctor account from the landing page to populate this list.</div>`}
+      </div>
+    `;
+    
+    document.querySelectorAll("[data-chat-doctor]").forEach((button) => {
+      button.addEventListener("click", () => {
+        window.location.href = `/chat.html?doctorId=${encodeURIComponent(button.dataset.chatDoctor)}`;
+      });
     });
-  });
-  document.querySelectorAll("[data-book-doctor]").forEach((button) => {
-    button.addEventListener("click", () => openAppointmentModal(button.dataset.bookDoctor, button.dataset.doctorName));
-  });
+    
+    document.querySelectorAll("[data-book-doctor]").forEach((button) => {
+      button.addEventListener("click", () => openAppointmentModal(button.dataset.bookDoctor, button.dataset.doctorName));
+    });
+    
+  } catch (error) {
+    console.error("Error loading doctors:", error);
+    document.getElementById("view").innerHTML = `<div class="panel error">Failed to load doctors: ${error.message}</div>`;
+  }
 }
 
 function openAppointmentModal(doctorId, doctorName) {
@@ -1158,19 +1478,37 @@ function closeAppointmentModal() {
 }
 
 async function renderEducation() {
-  setTitle("Education", "Menstruation info, health tips, and basic sex education from the API.");
-  const data = await api("/api/education");
-  document.getElementById("view").innerHTML = `
-    <div class="grid">
-      ${data.education.map((item) => `
-        <article class="edu-card">
-          <p class="muted">${escapeHtml(item.topic)}</p>
-          <h3>${escapeHtml(item.title)}</h3>
-          <p>${escapeHtml(item.body)}</p>
-        </article>
-      `).join("")}
-    </div>
-  `;
+  setTitle("Education", "Menstruation info, health tips, and basic sex education.");
+  
+  try {
+    // Use direct /api/education endpoint
+    const data = await api("/api/education");
+    const education = data.education || [];
+    
+    document.getElementById("view").innerHTML = `
+      <div class="grid">
+        ${education.length ? education.map((item) => `
+          <article class="edu-card">
+            <p class="muted">${escapeHtml(item.topic)}</p>
+            <h3>${escapeHtml(item.title)}</h3>
+            <p>${escapeHtml(item.body)}</p>
+          </article>
+        `).join("") : `
+          <div class="panel">
+            <p>Education content coming soon!</p>
+          </div>
+        `}
+      </div>
+    `;
+    
+  } catch (error) {
+    console.error("Error loading education:", error);
+    document.getElementById("view").innerHTML = `
+      <div class="panel error">
+        Failed to load education content: ${error.message}
+      </div>
+    `;
+  }
 }
 
 async function renderProfile() {

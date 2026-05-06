@@ -57,13 +57,22 @@ router.get(
     const nextPeriodDate = insights.nextPeriod;
     const daysUntilPeriod = Math.max(0, Math.round((new Date(nextPeriodDate) - new Date()) / 86400000));
 
+    // Get user's cycle history from cycles array - FIXED: ensure cycles is an array
+    let userCycles = [];
+    if (db.cycles && Array.isArray(db.cycles)) {
+      userCycles = db.cycles.filter(c => c.userId === req.auth.id);
+    } else if (db.cycles && typeof db.cycles === 'object') {
+      // Handle case where cycles is an object keyed by userId
+      userCycles = db.cycles[req.auth.id] || [];
+    }
+
     res.json({
       success: true,
       insights,
       cycle: currentCycle,
       expectedSymptoms: expectedSymptomsForPhase(insights.todayPhase),
       recommendedActions: recommendedActionsForPhase(insights.todayPhase),
-      history: db.cycles[user.id] || [],
+      history: userCycles,
       summary: {
         lastPeriod: user.lastPeriod,
         cycleLength: user.cycleLength,
@@ -114,31 +123,67 @@ router.post(
 
     const previousStart = user.lastPeriod;
     const oldCycleLength = user.cycleLength;
+    const newCycleLength = Number(cycleLength) || (previousStart ? daysBetween(previousStart, lastPeriod) : 28) || 28;
 
+    // Update user profile
     user.lastPeriod = lastPeriod;
-    user.cycleLength = Number(cycleLength) || daysBetween(previousStart, lastPeriod);
+    user.cycleLength = newCycleLength;
     user.updatedAt = new Date().toISOString();
 
+    // Save to cycles collection - FIXED: ensure cycles is an array
+    if (!db.cycles) {
+      db.cycles = [];
+    }
+    
+    // Convert to array if it's not
+    if (!Array.isArray(db.cycles)) {
+      // If cycles is an object, convert to array
+      if (typeof db.cycles === 'object') {
+        const cyclesArray = [];
+        Object.keys(db.cycles).forEach(key => {
+          if (Array.isArray(db.cycles[key])) {
+            cyclesArray.push(...db.cycles[key]);
+          }
+        });
+        db.cycles = cyclesArray;
+      } else {
+        db.cycles = [];
+      }
+    }
+    
     const cycleEntry = {
+      id: Date.now(),
+      userId: req.auth.id,
       startDate: lastPeriod,
-      cycleLength: user.cycleLength,
+      cycleLength: newCycleLength,
+      previousCycleLength: oldCycleLength || newCycleLength,
       recordedAt: new Date().toISOString(),
-      previousCycleLength: oldCycleLength
+      createdAt: new Date().toISOString()
     };
 
-    db.cycles[user.id] = [...(db.cycles[user.id] || []), cycleEntry];
+    db.cycles.push(cycleEntry);
 
-    logActivity(db, user.id, "cycle-update", `Cycle updated: ${lastPeriod}, ${user.cycleLength} days (was ${oldCycleLength} days)`);
+    if (typeof logActivity === 'function') {
+      logActivity(db, user.id, "cycle-update", `Cycle updated: ${lastPeriod}, ${newCycleLength} days (was ${oldCycleLength || 'N/A'} days)`);
+    }
+    
     await writeDb(db);
 
+    // Calculate fresh insights after update
     const insights = smartCyclePrediction(db, user);
     const currentCycle = calculateCycle(user.lastPeriod, user.cycleLength);
 
     res.json({
       success: true,
       message: "Cycle updated successfully",
-      cycle: currentCycle,
-      insights,
+      data: {
+        cycle: currentCycle,
+        insights,
+        user: {
+          lastPeriod: user.lastPeriod,
+          cycleLength: user.cycleLength
+        }
+      },
       lastUpdated: cycleEntry.recordedAt
     });
   })
@@ -160,7 +205,20 @@ router.get(
       return res.status(404).json({ success: false, error: "User not found" });
     }
 
-    const cycleHistory = cycleStarts(db, user);
+    // Get user's cycle history from cycles array - FIXED: ensure cycles is an array
+    let userCycles = [];
+    if (db.cycles && Array.isArray(db.cycles)) {
+      userCycles = db.cycles.filter(c => c.userId === req.auth.id);
+    } else if (db.cycles && typeof db.cycles === 'object') {
+      userCycles = db.cycles[req.auth.id] || [];
+    }
+    
+    const cycleHistory = userCycles.map(cycle => ({
+      startDate: cycle.startDate,
+      cycleLength: cycle.cycleLength,
+      recordedAt: cycle.recordedAt
+    }));
+
     const analytics = symptomAnalytics(db, user.id, false);
     const insights = generateInsightList(db, user, false);
 
@@ -244,24 +302,52 @@ router.get(
   requireAuth,
   asyncRoute(async (req, res) => {
     const db = await readDb();
-
-    if (req.auth.role === "user" && req.auth.id !== req.params.userId) {
-      return res.status(403).json({ success: false, error: "Cannot view another user's analytics" });
+    const requestedUserId = req.params.userId;
+    
+    // Handle both numeric and string IDs
+    let userId;
+    if (typeof requestedUserId === 'string' && requestedUserId.startsWith('user_')) {
+      userId = requestedUserId; // Keep as string for string IDs
+    } else {
+      userId = parseInt(requestedUserId); // Convert to number for numeric IDs
     }
 
-    const user = db.users.find((account) => account.id === req.params.userId);
+    // Check authorization
+    if (req.auth.role === "user" && req.auth.id !== userId) {
+      return res.status(403).json({ 
+        success: false, 
+        error: "Cannot view another user's analytics" 
+      });
+    }
+
+    // Find user by ID (handling both string and numeric)
+    const user = db.users.find((account) => account.id === userId);
+    
     if (!user) {
-      return res.status(404).json({ success: false, error: "User not found" });
+      return res.status(404).json({ 
+        success: false, 
+        error: "User not found" 
+      });
     }
 
     const sharedOnly = req.auth.role === "doctor";
     const analytics = symptomAnalytics(db, user.id, sharedOnly);
     const prediction = smartCyclePrediction(db, user);
 
-    const symptomFrequencyChart = analytics.frequency.map(item => ({ name: item.symptom, value: item.count }));
-    const painTrendChart = analytics.painTrend.map(point => ({ date: point.date, painLevel: point.painLevel }));
+    const symptomFrequencyChart = analytics.frequency.map(item => ({ 
+      name: item.symptom, 
+      value: item.count 
+    }));
+    
+    const painTrendChart = analytics.painTrend.map(point => ({ 
+      date: point.date, 
+      painLevel: point.painLevel 
+    }));
+    
     const recentPain = analytics.painTrend.slice(-7);
-    const painTrendDirection = recentPain.length >= 2 ? recentPain[recentPain.length - 1].painLevel - recentPain[0].painLevel : 0;
+    const painTrendDirection = recentPain.length >= 2 
+      ? recentPain[recentPain.length - 1].painLevel - recentPain[0].painLevel 
+      : 0;
 
     res.json({
       success: true,
@@ -277,11 +363,17 @@ router.get(
         painTrend: analytics.painTrend,
         highPainAlerts: analytics.highPainAlerts
       },
-      charts: { symptomFrequency: symptomFrequencyChart, painTrend: painTrendChart },
+      charts: { 
+        symptomFrequency: symptomFrequencyChart, 
+        painTrend: painTrendChart 
+      },
       prediction: {
         nextPeriod: prediction.nextPeriod,
         ovulation: prediction.ovulation,
-        fertileWindow: { start: prediction.fertileStart, end: prediction.fertileEnd },
+        fertileWindow: { 
+          start: prediction.fertileStart, 
+          end: prediction.fertileEnd 
+        },
         confidence: prediction.predictionConfidence,
         isIrregular: prediction.irregularCycle,
         currentPhase: prediction.todayPhase,

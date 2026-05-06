@@ -12,7 +12,7 @@ const {
   logActivity
 } = require("../utils/helpers");
 
-
+console.log("✅✅✅ PRODUCT ROUTES FILE IS LOADED ✅✅✅");
 // ==================== GET PRODUCTS ====================
 // FIXED: /products → /
 router.get(

@@ -149,8 +149,15 @@ async function saveSymptoms(event) {
   const other = document.getElementById("otherSymptom").value.trim();
   if (other) checked.push(other);
   const message = document.getElementById("symptomMessage");
+  
+  // Show loading state
+  const submitBtn = document.querySelector('#symptomsForm button[type="submit"]');
+  const originalText = submitBtn.textContent;
+  submitBtn.textContent = "Saving...";
+  submitBtn.disabled = true;
+  
   try {
-    await symptomsApi("/api/symptoms", {
+    const response = await symptomsApi("/api/symptoms", {
       method: "POST",
       body: JSON.stringify({
         date: document.getElementById("symptomDate").value,
@@ -160,19 +167,49 @@ async function saveSymptoms(event) {
         sharedWithDoctor: document.getElementById("shareWithDoctor").checked
       })
     });
+    
+    console.log("✅ Symptoms saved successfully:", response);
+    
     message.className = "notice";
-    message.textContent = "Symptoms saved.";
+    message.textContent = "✅ Symptoms saved successfully!";
+    
+    // 🔥 IMPORTANT: Set flag to notify dashboard to refresh
+    localStorage.setItem('menstrumateSymptomsUpdated', Date.now().toString());
+    localStorage.setItem('menstrumateSymptomsData', JSON.stringify({
+      date: document.getElementById("symptomDate").value,
+      symptoms: checked,
+      painLevel: document.getElementById("painLevel").value,
+      timestamp: Date.now()
+    }));
+    
     await loadHistory();
+    
     if (onboardingMode || currentUser?.isFirstLogin) {
-      await symptomsApi("/api/auth/complete-onboarding", {
-  method: "PATCH"
-});
-
-window.location.href = "/#dashboard";
+      try {
+        await symptomsApi("/api/auth/complete-onboarding", {
+          method: "PATCH"
+        });
+      } catch (err) {
+        console.log("Onboarding completion note:", err.message);
+      }
+      
+      // Show success message before redirect
+      setTimeout(() => {
+        window.location.href = "/#dashboard?refresh=true&symptoms=updated";
+      }, 1500);
+    } else {
+      // Show success and redirect after 2 seconds
+      setTimeout(() => {
+        window.location.href = "/#dashboard?refresh=true";
+      }, 2000);
     }
+    
   } catch (err) {
+    console.error("❌ Error saving symptoms:", err);
     message.className = "notice error";
-    message.textContent = err.message;
+    message.textContent = "❌ " + (err.message || "Failed to save symptoms");
+    submitBtn.textContent = originalText;
+    submitBtn.disabled = false;
   }
 }
 

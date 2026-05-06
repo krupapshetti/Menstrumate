@@ -1,255 +1,330 @@
 const express = require("express");
-const bcrypt = require("bcrypt");
-
 const router = express.Router();
 
+const { requireAuth, requireDoctor } = require("../middleware/authMiddleware");
 const asyncRoute = require("../middleware/asyncMiddleware");
-const { requireAuth } = require("../middleware/authMiddleware");
-
 const { readDb, writeDb } = require("../services/db");
-
-const { requireFields } = require("../utils/validators");
 const { logActivity } = require("../utils/activity");
 
-const {
-  createToken,
-  publicAccount,
-  publicDoctor
-} = require("../utils/auth");
-
-// ==================== REQUEST OTP ====================
+// ==================== BOOK APPOINTMENT ====================
 router.post(
-  "/request-otp",
+  "/",
+  requireAuth,
   asyncRoute(async (req, res) => {
-    const { email, role } = req.body;
+    const { doctorId, date, time, notes } = req.body;
 
-    if (!email || !["user", "doctor"].includes(role)) {
-      return res.status(400).json({ error: "Valid email and role required" });
+    if (!doctorId || !date || !time) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Doctor ID, date, and time are required" 
+      });
     }
 
     const db = await readDb();
+    
+    // Check if doctor exists
+    const doctor = db.doctors?.find(d => d.id === doctorId);
+    if (!doctor) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Doctor not found" 
+      });
+    }
 
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
-
-    db.otps = db.otps.filter(
-      (item) => !(item.email === email.toLowerCase() && item.role === role)
+    // Check if slot is already booked
+    const existingAppointment = db.appointments?.find(
+      a => a.doctorId === doctorId && a.date === date && a.time === time
     );
 
-    db.otps.push({
-      email: email.toLowerCase(),
-      role,
-      otp,
-      expiresAt: Date.now() + 10 * 60 * 1000
-    });
-
-    await writeDb(db);
-
-    res.json({
-      success: true,
-      message: "OTP generated successfully",
-      otp
-    });
-  })
-);
-
-// ==================== SIGNUP ====================
-router.post(
-  "/signup",
-  asyncRoute(async (req, res) => {
-    const {
-      role,
-      name,
-      email,
-      otp,
-      password,
-      confirmPassword,
-      specialty,
-      specialization,
-      experience,
-      clinic,
-      cycleLength,
-      lastPeriod
-    } = req.body;
-
-    const requiredError = requireFields(req.body, [
-      "role",
-      "name",
-      "email",
-      "otp",
-      "password",
-      "confirmPassword"
-    ]);
-
-    if (requiredError) {
-      return res.status(400).json({ error: requiredError });
+    if (existingAppointment) {
+      return res.status(409).json({ 
+        success: false, 
+        error: "Time slot is already booked" 
+      });
     }
 
-    if (!["user", "doctor"].includes(role)) {
-      return res.status(400).json({ error: "Invalid role" });
-    }
-
-    if (password !== confirmPassword) {
-      return res.status(400).json({ error: "Passwords do not match" });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters" });
-    }
-
-    const doctorSpecialty = String(specialization || specialty || "").trim();
-    if (role === "doctor" && !doctorSpecialty) {
-      return res.status(400).json({ error: "Specialization is required for doctors" });
-    }
-
-    const db = await readDb();
-    const normalizedEmail = email.toLowerCase();
-    const listName = role === "doctor" ? "doctors" : "users";
-
-    if (db[listName].some((account) => account.email === normalizedEmail)) {
-      return res.status(409).json({ error: "Account already exists" });
-    }
-
-    const otpRecord = db.otps.find(
-      (item) =>
-        item.email === normalizedEmail &&
-        item.role === role &&
-        item.otp === otp
-    );
-
-    if (!otpRecord || otpRecord.expiresAt < Date.now()) {
-      return res.status(400).json({ error: "Invalid or expired OTP" });
-    }
-
-    const account = {
-      id: `${role}_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-      role,
-      name: name.trim(),
-      email: normalizedEmail,
-      passwordHash: await bcrypt.hash(password, 10),
+    const appointment = {
+      id: `appt_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      userId: req.auth.id,
+      doctorId,
+      date,
+      time,
+      notes: notes || "",
+      status: "scheduled",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
-    if (role === "doctor") {
-      account.specialty = doctorSpecialty;
-      account.isOnline = true;
-      account.lastSeen = new Date().toISOString();
-    } else {
-      account.cycleLength = Number(cycleLength) || 28;
-      account.lastPeriod = lastPeriod || new Date().toISOString().slice(0, 10);
+    if (!db.appointments) db.appointments = [];
+    db.appointments.push(appointment);
 
-      db.cycles[account.id] = [];
-      logActivity(db, account.id, "signup", "Patient account created");
-    }
-
-    db[listName].push(account);
-    db.otps = db.otps.filter((item) => item !== otpRecord);
+    logActivity(db, req.auth.id, "appointment-booked", `Booked appointment with ${doctor.name} on ${date} at ${time}`);
 
     await writeDb(db);
 
-    const publicData =
-      role === "doctor"
-        ? publicDoctor(account)
-        : publicAccount(account);
-
     res.status(201).json({
       success: true,
-      message: "Account created successfully",
-      token: createToken(account), // ✅ FIXED
-      account: publicData,
-      user: publicData
+      message: "Appointment booked successfully",
+      data: appointment
     });
   })
 );
 
-// ==================== LOGIN ====================
-router.post(
-  "/login",
+// ==================== GET USER'S APPOINTMENTS ====================
+router.get(
+  "/user/:userId",
+  requireAuth,
   asyncRoute(async (req, res) => {
-    const { email, password } = req.body;
+    const { userId } = req.params;
 
-    if (!email || !password) {
-      return res.status(400).json({
-        error: "Email and password are required"
+    // Check authorization
+    if (req.auth.role === "user" && req.auth.id !== userId) {
+      return res.status(403).json({ 
+        success: false, 
+        error: "Cannot view another user's appointments" 
       });
     }
 
     const db = await readDb();
+    
+    const appointments = (db.appointments || [])
+      .filter(a => a.userId === userId)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    let account =
-      db.users.find((u) => u.email === email.toLowerCase()) ||
-      db.doctors.find((d) => d.email === email.toLowerCase());
+    // Add doctor details
+    const appointmentsWithDetails = appointments.map(apt => ({
+      ...apt,
+      doctor: db.doctors?.find(d => d.id === apt.doctorId)
+    }));
 
-    if (!account || !(await bcrypt.compare(password, account.passwordHash))) {
-      return res.status(401).json({
-        error: "Invalid email or password"
+    res.json({
+      success: true,
+      appointments: appointmentsWithDetails,
+      total: appointmentsWithDetails.length
+    });
+  })
+);
+
+// ==================== GET DOCTOR'S APPOINTMENTS ====================
+router.get(
+  "/doctor/:doctorId",
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const { doctorId } = req.params;
+
+    // Check authorization
+    if (req.auth.role === "doctor" && req.auth.id !== doctorId) {
+      return res.status(403).json({ 
+        success: false, 
+        error: "Cannot view another doctor's appointments" 
       });
     }
 
-    if (account.role === "doctor") {
-      account.isOnline = true;
-      account.lastSeen = new Date().toISOString();
-      await writeDb(db);
-    }
+    const db = await readDb();
+    
+    const appointments = (db.appointments || [])
+      .filter(a => a.doctorId === doctorId)
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    const publicData =
-      account.role === "doctor"
-        ? publicDoctor(account)
-        : publicAccount(account);
+    // Add patient details
+    const appointmentsWithDetails = appointments.map(apt => ({
+      ...apt,
+      patient: db.users?.find(u => u.id === apt.userId)
+    }));
 
     res.json({
       success: true,
-      message: "Login successful",
-      token: createToken(account), // ✅ FIXED
-      account: publicData,
-      user: publicData
+      appointments: appointmentsWithDetails,
+      total: appointmentsWithDetails.length
     });
   })
 );
 
-// ==================== LOGOUT ====================
-router.post(
-  "/logout",
+// ==================== GET APPOINTMENT BY ID ====================
+router.get(
+  "/:appointmentId",
   requireAuth,
   asyncRoute(async (req, res) => {
+    const { appointmentId } = req.params;
     const db = await readDb();
 
-    if (req.auth.role === "doctor") {
-      const doctor = db.doctors.find((d) => d.id === req.auth.id);
-      if (doctor) {
-        doctor.isOnline = false;
-        doctor.lastSeen = new Date().toISOString();
-        await writeDb(db);
-      }
+    const appointment = db.appointments?.find(a => a.id === appointmentId);
+
+    if (!appointment) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Appointment not found" 
+      });
     }
+
+    // Check authorization
+    if (req.auth.role === "user" && appointment.userId !== req.auth.id) {
+      return res.status(403).json({ 
+        success: false, 
+        error: "Access denied" 
+      });
+    }
+    if (req.auth.role === "doctor" && appointment.doctorId !== req.auth.id) {
+      return res.status(403).json({ 
+        success: false, 
+        error: "Access denied" 
+      });
+    }
+
+    const appointmentWithDetails = {
+      ...appointment,
+      patient: db.users?.find(u => u.id === appointment.userId),
+      doctor: db.doctors?.find(d => d.id === appointment.doctorId)
+    };
 
     res.json({
       success: true,
-      message: "Logged out successfully"
+      appointment: appointmentWithDetails
     });
   })
 );
 
-// ==================== REFRESH TOKEN ====================
-router.post(
-  "/refresh-token",
+// ==================== CANCEL APPOINTMENT ====================
+router.patch(
+  "/:appointmentId/cancel",
   requireAuth,
   asyncRoute(async (req, res) => {
+    const { appointmentId } = req.params;
     const db = await readDb();
 
-    let account =
-      db.users.find((u) => u.id === req.auth.id) ||
-      db.doctors.find((d) => d.id === req.auth.id);
+    const appointmentIndex = db.appointments?.findIndex(a => a.id === appointmentId);
 
-    if (!account) {
-      return res.status(404).json({ error: "Account not found" });
+    if (appointmentIndex === -1 || appointmentIndex === undefined) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Appointment not found" 
+      });
     }
 
-    const newToken = createToken(account); // ✅ FIXED
+    const appointment = db.appointments[appointmentIndex];
+
+    // Check authorization
+    if (appointment.userId !== req.auth.id && appointment.doctorId !== req.auth.id) {
+      return res.status(403).json({ 
+        success: false, 
+        error: "Cannot cancel this appointment" 
+      });
+    }
+
+    // Can only cancel if not already cancelled or completed
+    if (appointment.status === "cancelled") {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Appointment is already cancelled" 
+      });
+    }
+    if (appointment.status === "completed") {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Cannot cancel completed appointment" 
+      });
+    }
+
+    appointment.status = "cancelled";
+    appointment.updatedAt = new Date().toISOString();
+
+    await writeDb(db);
+
+    logActivity(db, req.auth.id, "appointment-cancelled", `Cancelled appointment on ${appointment.date} at ${appointment.time}`);
 
     res.json({
       success: true,
-      token: newToken
+      message: "Appointment cancelled successfully",
+      appointment
+    });
+  })
+);
+
+// ==================== UPDATE APPOINTMENT STATUS ====================
+router.patch(
+  "/:appointmentId/status",
+  requireAuth,
+  requireDoctor,
+  asyncRoute(async (req, res) => {
+    const { appointmentId } = req.params;
+    const { status } = req.body;
+
+    if (!["scheduled", "completed", "cancelled", "no-show"].includes(status)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Invalid status" 
+      });
+    }
+
+    const db = await readDb();
+    const appointmentIndex = db.appointments?.findIndex(a => a.id === appointmentId);
+
+    if (appointmentIndex === -1 || appointmentIndex === undefined) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Appointment not found" 
+      });
+    }
+
+    const appointment = db.appointments[appointmentIndex];
+
+    // Only doctor can update status
+    if (appointment.doctorId !== req.auth.id) {
+      return res.status(403).json({ 
+        success: false, 
+        error: "Only the assigned doctor can update appointment status" 
+      });
+    }
+
+    appointment.status = status;
+    appointment.updatedAt = new Date().toISOString();
+
+    await writeDb(db);
+
+    res.json({
+      success: true,
+      message: `Appointment marked as ${status}`,
+      appointment
+    });
+  })
+);
+
+// ==================== GET APPOINTMENT SLOTS ====================
+router.get(
+  "/slots/:doctorId",
+  asyncRoute(async (req, res) => {
+    const { doctorId } = req.params;
+    const { date } = req.query;
+
+    if (!date) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Date is required" 
+      });
+    }
+
+    const slots = [];
+    const times = ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"];
+    
+    const db = await readDb();
+    
+    const bookedAppointments = (db.appointments || []).filter(
+      a => a.doctorId === doctorId && a.date === date && a.status !== "cancelled"
+    );
+    
+    const bookedTimes = bookedAppointments.map(a => a.time);
+    
+    for (const time of times) {
+      slots.push({
+        time,
+        available: !bookedTimes.includes(time)
+      });
+    }
+    
+    res.json({
+      success: true,
+      slots,
+      date
     });
   })
 );
