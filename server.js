@@ -3,6 +3,7 @@ const cors = require("cors");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const path = require("path");
+const fs = require("fs/promises");
 const connectDB = require("./config/db");
 const User = require("./models/User");
 const Symptom = require("./models/Symptom");
@@ -17,6 +18,8 @@ const FollowUp = require("./models/FollowUp");
 const ActivityLog = require("./models/ActivityLog");
 const CycleHistory = require("./models/CycleHistory");
 const AppState = require("./models/AppState");
+const CommunityMessage = require("./models/CommunityMessage");
+const CommunityPost = require("./models/CommunityPost");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,11 +27,10 @@ const SECRET = process.env.JWT_SECRET || "menstrumate-dev-secret";
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+app.get(["/cart.html", "/checkout.html"], (req, res) => res.redirect("/#cart"));
 app.get([
   "/login.html",
   "/shop.html",
-  "/cart.html",
-  "/checkout.html",
   "/dashboard.html",
   "/guidance.html"
 ], (req, res) => res.redirect("/"));
@@ -96,6 +98,13 @@ const seedShopRules = [
   { match: "mood swings", categories: ["Chocolate / Comfort"] }
 ];
 
+const seedEntertainment = [
+  { id: "breathing", title: "One-minute calm", type: "Mind reset", body: "Follow a slow 4-count inhale and 6-count exhale for one minute." },
+  { id: "comfort-list", title: "Comfort playlist idea", type: "Mood lift", body: "Queue soft music, dim the lights, and keep hydration nearby." },
+  { id: "journal", title: "Tiny journal prompt", type: "Reflection", body: "Write one thing your body needs and one thing you can postpone." },
+  { id: "screen-break", title: "Screen break", type: "Recharge", body: "Rest your eyes, stretch your neck, and unclench your shoulders." }
+];
+
 const defaultDb = {
   users: [],
   doctors: [],
@@ -117,7 +126,9 @@ const defaultDb = {
   symptomOptions: seedSymptomOptions,
   insightRules: seedInsightRules,
   appointmentSlots: seedAppointmentSlots,
-  shopRules: seedShopRules
+  shopRules: seedShopRules,
+  entertainment: seedEntertainment,
+  communityMessages: []
 };
 
 function normalizeDb(parsed = {}) {
@@ -149,6 +160,8 @@ function normalizeDb(parsed = {}) {
   db.insightRules = Array.isArray(db.insightRules) && db.insightRules.length ? db.insightRules : seedInsightRules;
   db.appointmentSlots = Array.isArray(db.appointmentSlots) && db.appointmentSlots.length ? db.appointmentSlots : seedAppointmentSlots;
   db.shopRules = Array.isArray(db.shopRules) && db.shopRules.length ? db.shopRules : seedShopRules;
+  db.entertainment = Array.isArray(db.entertainment) && db.entertainment.length ? db.entertainment : seedEntertainment;
+  db.communityMessages = Array.isArray(db.communityMessages) ? db.communityMessages : [];
   db.chats = db.chats.map((chat) => ({
     ...chat,
     typing: chat.typing && typeof chat.typing === "object" ? chat.typing : {}
@@ -197,7 +210,8 @@ async function ensureAppState() {
     symptomOptions: seedSymptomOptions,
     insightRules: seedInsightRules,
     appointmentSlots: seedAppointmentSlots,
-    shopRules: seedShopRules
+    shopRules: seedShopRules,
+    entertainment: seedEntertainment
   });
   return created.toObject();
 }
@@ -216,7 +230,8 @@ async function readDb() {
     activityLogs,
     chats,
     symptoms,
-    appointments
+    appointments,
+    communityMessages
   ] = await Promise.all([
     ensureAppState(),
     User.find({}).lean(),
@@ -230,7 +245,8 @@ async function readDb() {
     ActivityLog.find({}).lean(),
     Chat.find({}).lean(),
     Symptom.find({}).lean(),
-    Appointment.find({}).lean()
+    Appointment.find({}).lean(),
+    CommunityMessage.find({}).sort({ createdAt: 1 }).lean()
   ]);
 
   const db = normalizeDb({
@@ -258,7 +274,9 @@ async function readDb() {
     symptomOptions: appState.symptomOptions,
     insightRules: appState.insightRules,
     appointmentSlots: appState.appointmentSlots,
-    shopRules: appState.shopRules
+    shopRules: appState.shopRules,
+    entertainment: appState.entertainment,
+    communityMessages: communityMessages.map(stripMongo)
   });
   return structuredClone(db);
 }
@@ -290,6 +308,7 @@ async function writeDb(db) {
     replaceCollection(Chat, normalized.chats),
     replaceCollection(Symptom, normalized.symptoms),
     replaceCollection(Appointment, normalized.appointments),
+    replaceCollection(CommunityMessage, normalized.communityMessages),
     AppState.updateOne(
       { key: "default" },
       {
@@ -301,12 +320,55 @@ async function writeDb(db) {
           symptomOptions: normalized.symptomOptions,
           insightRules: normalized.insightRules,
           appointmentSlots: normalized.appointmentSlots,
-          shopRules: normalized.shopRules
+          shopRules: normalized.shopRules,
+          entertainment: normalized.entertainment
         }
       },
       { upsert: true }
     )
   ]);
+}
+
+async function importJsonDataIfMongoEmpty() {
+  const hasMongoData = await Promise.all([
+    User.exists({}),
+    Symptom.exists({}),
+    Chat.exists({}),
+    Appointment.exists({}),
+    CommunityMessage.exists({}),
+    CommunityPost.exists({})
+  ]);
+  if (hasMongoData.some(Boolean)) return;
+
+  const dbPath = path.join(__dirname, "data", "db.json");
+  let parsed;
+  try {
+    parsed = JSON.parse(await fs.readFile(dbPath, "utf8"));
+  } catch (err) {
+    if (err.code !== "ENOENT") console.warn("Could not read data/db.json for MongoDB bootstrap:", err.message);
+    return;
+  }
+
+  const normalized = normalizeDb(parsed);
+  const hasJsonData = [
+    normalized.users,
+    normalized.doctors,
+    normalized.symptoms,
+    normalized.appointments,
+    normalized.chats,
+    normalized.patientMessages,
+    normalized.patientRecommendations,
+    normalized.followUps,
+    normalized.communityMessages,
+    parsed.communityPosts || []
+  ].some((items) => Array.isArray(items) && items.length);
+  if (!hasJsonData) return;
+
+  await writeDb(normalized);
+  if (Array.isArray(parsed.communityPosts) && parsed.communityPosts.length) {
+    await replaceCollection(CommunityPost, parsed.communityPosts);
+  }
+  console.log("Bootstrapped existing data/db.json into MongoDB.");
 }
 
 function publicAccount(account) {
@@ -362,14 +424,27 @@ function logActivity(db, userId, type, detail) {
   });
 }
 
-function addDays(dateText, days) {
-  const date = new Date(dateText);
-  date.setDate(date.getDate() + days);
+function parseDateOnly(dateText) {
+  const [year, month, day] = String(dateText || "").split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function formatDateOnly(date) {
   return date.toISOString().slice(0, 10);
 }
 
+function addDays(dateText, days) {
+  const date = parseDateOnly(dateText) || new Date();
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return formatDateOnly(date);
+}
+
 function daysBetween(a, b) {
-  return Math.max(1, Math.round((new Date(b) - new Date(a)) / 86400000));
+  const start = parseDateOnly(a);
+  const end = parseDateOnly(b);
+  if (!start || !end) return 1;
+  return Math.max(1, Math.round((end - start) / 86400000));
 }
 
 function calculateCycle(lastPeriod, cycleLength) {
@@ -385,7 +460,8 @@ function calculateCycle(lastPeriod, cycleLength) {
 }
 
 function cycleInsights(lastPeriod, cycleLength) {
-  const nextPeriod = addDays(lastPeriod, cycleLength);
+  const safeCycleLength = Math.min(60, Math.max(15, Number(cycleLength) || 28));
+  const nextPeriod = addDays(lastPeriod, safeCycleLength);
   const reminder = addDays(nextPeriod, -3);
   const ovulation = addDays(nextPeriod, -14);
   return {
@@ -404,11 +480,11 @@ function cycleStarts(db, user) {
       cycleLength: Number(item.cycleLength)
     }))
     .filter((item) => item.startDate)
-    .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+    .sort((a, b) => (parseDateOnly(a.startDate) || 0) - (parseDateOnly(b.startDate) || 0));
   if (!starts.some((item) => item.startDate === user.lastPeriod)) {
     starts.push({ startDate: user.lastPeriod, cycleLength: Number(user.cycleLength) || 28 });
   }
-  return starts.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+  return starts.sort((a, b) => (parseDateOnly(a.startDate) || 0) - (parseDateOnly(b.startDate) || 0));
 }
 
 function smartCyclePrediction(db, user) {
@@ -429,7 +505,7 @@ function smartCyclePrediction(db, user) {
     : 0;
   const irregular = averageLength < 21 || averageLength > 35 || variance > 4;
   const latestStart = starts[starts.length - 1]?.startDate || user.lastPeriod;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = formatDateOnly(new Date());
   const dayInCycle = Math.max(1, daysBetween(latestStart, today) + 1);
   const phase = calculateCycle(latestStart, averageLength).find((day) => day.day === ((dayInCycle - 1) % averageLength) + 1)?.phase || "Luteal";
   const confidence = Math.max(45, Math.min(96, 92 - Math.round(variance * 6) + Math.min(lengths.length, 5) * 2));
@@ -839,9 +915,37 @@ app.get("/api/products", requireAuth, async (req, res) => {
   res.json({ categories, products: db.products, recommendations });
 });
 
+function buildCartItem(product, quantity) {
+  return {
+    productId: product.id,
+    id: product.id,
+    name: product.name,
+    price: Number(product.price) || 0,
+    image: product.image,
+    category: product.category,
+    quantity: Math.max(1, Number(quantity) || 1)
+  };
+}
+
+function hydrateCart(db, userId) {
+  const merged = new Map();
+  (db.carts[userId] || []).forEach((entry) => {
+    const productId = entry.productId || entry.id;
+    const product = db.products.find((item) => item.id === productId);
+    if (!product) return;
+    const previous = merged.get(productId);
+    const quantity = Math.max(1, Number(entry.quantity) || 1) + (previous?.quantity || 0);
+    merged.set(productId, buildCartItem(product, quantity));
+  });
+  db.carts[userId] = [...merged.values()];
+  return db.carts[userId];
+}
+
 app.get("/api/cart", requireAuth, async (req, res) => {
   const db = await readDb();
-  res.json({ items: db.carts[req.auth.id] || [] });
+  const items = hydrateCart(db, req.auth.id);
+  await writeDb(db);
+  res.json({ items });
 });
 
 app.post("/api/cart/items", requireAuth, async (req, res) => {
@@ -849,21 +953,22 @@ app.post("/api/cart/items", requireAuth, async (req, res) => {
   const db = await readDb();
   const product = db.products.find((item) => item.id === productId);
   if (!product) return res.status(404).json({ error: "Product not found" });
-  const cart = db.carts[req.auth.id] || [];
+  const parsedQuantity = Math.max(1, Number(quantity) || 1);
+  const cart = hydrateCart(db, req.auth.id);
   const existing = cart.find((item) => item.productId === productId);
-  if (existing) existing.quantity += Number(quantity);
-  else cart.push({ productId, quantity: Number(quantity) });
-  db.carts[req.auth.id] = cart.filter((item) => item.quantity > 0);
+  if (existing) existing.quantity = Math.max(1, Number(existing.quantity || 0) + parsedQuantity);
+  else cart.push(buildCartItem(product, parsedQuantity));
+  db.carts[req.auth.id] = hydrateCart(db, req.auth.id);
   await writeDb(db);
   res.json({ items: db.carts[req.auth.id] });
 });
 
 app.patch("/api/cart/items/:productId", requireAuth, async (req, res) => {
   const db = await readDb();
-  const cart = db.carts[req.auth.id] || [];
+  const cart = hydrateCart(db, req.auth.id);
   const item = cart.find((entry) => entry.productId === req.params.productId);
   if (!item) return res.status(404).json({ error: "Cart item not found" });
-  item.quantity = Number(req.body.quantity);
+  item.quantity = Math.max(0, Number(req.body.quantity) || 0);
   db.carts[req.auth.id] = cart.filter((entry) => entry.quantity > 0);
   await writeDb(db);
   res.json({ items: db.carts[req.auth.id] });
@@ -871,15 +976,14 @@ app.patch("/api/cart/items/:productId", requireAuth, async (req, res) => {
 
 app.delete("/api/cart/items/:productId", requireAuth, async (req, res) => {
   const db = await readDb();
-  db.carts[req.auth.id] = (db.carts[req.auth.id] || []).filter((item) => item.productId !== req.params.productId);
+  db.carts[req.auth.id] = hydrateCart(db, req.auth.id).filter((item) => item.productId !== req.params.productId);
   await writeDb(db);
   res.json({ items: db.carts[req.auth.id] });
 });
 
 app.post("/api/checkout", requireAuth, async (req, res) => {
   const db = await readDb();
-  const cart = db.carts[req.auth.id] || [];
-  const items = cart.map((entry) => ({ ...db.products.find((product) => product.id === entry.productId), quantity: entry.quantity }));
+  const items = hydrateCart(db, req.auth.id);
   const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   if (!items.length) return res.status(400).json({ error: "Cart is empty" });
   const payment = {
@@ -1440,6 +1544,116 @@ app.get("/api/education", requireAuth, async (req, res) => {
   res.json({ education: db.education });
 });
 
+app.get("/api/entertainment", requireAuth, asyncRoute(async (req, res) => {
+  const db = await readDb();
+  res.json({ activities: db.entertainment });
+}));
+
+app.get("/api/community/messages", requireAuth, asyncRoute(async (req, res) => {
+  const room = String(req.query.room || "General Chat").trim();
+  const db = await readDb();
+  const messages = db.communityMessages
+    .filter((item) => (item.room || "General Chat") === room)
+    .slice()
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    .slice(-80);
+  res.json({ messages });
+}));
+
+app.post("/api/community/messages", requireAuth, asyncRoute(async (req, res) => {
+  const message = String(req.body.message || "").trim();
+  const room = String(req.body.room || "General Chat").trim();
+  if (!message) return res.status(400).json({ error: "Message is required" });
+  if (message.length > 500) return res.status(400).json({ error: "Message must be 500 characters or fewer" });
+  if (!room) return res.status(400).json({ error: "Room is required" });
+  const db = await readDb();
+  const account = [...db.users, ...db.doctors].find((item) => item.id === req.auth.id);
+  if (!account) return res.status(404).json({ error: "Account not found" });
+  const entry = {
+    id: `community_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    userId: req.auth.id,
+    name: account.name,
+    role: req.auth.role,
+    room,
+    message,
+    createdAt: new Date().toISOString()
+  };
+  db.communityMessages.push(entry);
+  await writeDb(db);
+  res.status(201).json({ message: entry });
+}));
+
+function publicCommunityPost(post, viewerId) {
+  const item = stripMongo(post);
+  const reactions = Array.isArray(item.reactions) ? item.reactions : [];
+  const comments = Array.isArray(item.comments) ? item.comments : [];
+  return {
+    id: item.id,
+    body: item.body,
+    mood: item.mood || "",
+    createdAt: item.createdAt,
+    anonymousName: "Anonymous member",
+    reactionCount: reactions.length,
+    reacted: reactions.some((reaction) => reaction.userId === viewerId),
+    comments: comments.map((comment) => ({
+      id: comment.id,
+      body: comment.body,
+      createdAt: comment.createdAt,
+      anonymousName: "Anonymous member"
+    }))
+  };
+}
+
+app.get("/api/community/posts", requireAuth, asyncRoute(async (req, res) => {
+  const posts = await CommunityPost.find({}).sort({ createdAt: -1 }).limit(50).lean();
+  res.json({ posts: posts.map((post) => publicCommunityPost(post, req.auth.id)) });
+}));
+
+app.post("/api/community/posts", requireAuth, asyncRoute(async (req, res) => {
+  const body = String(req.body.body || "").trim();
+  const mood = String(req.body.mood || "").trim();
+  if (!body) return res.status(400).json({ error: "Post cannot be empty" });
+  if (body.length > 800) return res.status(400).json({ error: "Post must be 800 characters or fewer" });
+  const post = await CommunityPost.create({
+    id: `post_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    authorId: req.auth.id,
+    body,
+    mood,
+    reactions: [],
+    comments: [],
+    createdAt: new Date().toISOString()
+  });
+  res.status(201).json({ post: publicCommunityPost(post, req.auth.id) });
+}));
+
+app.post("/api/community/posts/:postId/comments", requireAuth, asyncRoute(async (req, res) => {
+  const body = String(req.body.body || "").trim();
+  if (!body) return res.status(400).json({ error: "Comment cannot be empty" });
+  if (body.length > 500) return res.status(400).json({ error: "Comment must be 500 characters or fewer" });
+  const post = await CommunityPost.findOne({ id: req.params.postId });
+  if (!post) return res.status(404).json({ error: "Post not found" });
+  post.comments.push({
+    id: `comment_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    authorId: req.auth.id,
+    body,
+    createdAt: new Date().toISOString()
+  });
+  await post.save();
+  res.status(201).json({ post: publicCommunityPost(post, req.auth.id) });
+}));
+
+app.post("/api/community/posts/:postId/react", requireAuth, asyncRoute(async (req, res) => {
+  const post = await CommunityPost.findOne({ id: req.params.postId });
+  if (!post) return res.status(404).json({ error: "Post not found" });
+  const reactions = Array.isArray(post.reactions) ? post.reactions : [];
+  const existingIndex = reactions.findIndex((reaction) => reaction.userId === req.auth.id);
+  if (existingIndex >= 0) reactions.splice(existingIndex, 1);
+  else reactions.push({ userId: req.auth.id, emoji: "heart", createdAt: new Date().toISOString() });
+  post.reactions = reactions;
+  await post.save();
+  res.json({ post: publicCommunityPost(post, req.auth.id) });
+}));
+
 app.get([
   "/",
   "/login",
@@ -1459,6 +1673,7 @@ app.get([
 async function startServer() {
   try {
     await connectDB();
+    await importJsonDataIfMongoEmpty();
     app.listen(PORT, () => {
       console.log(`Menstrumate running on http://localhost:${PORT}`);
     });

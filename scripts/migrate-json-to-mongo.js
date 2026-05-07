@@ -14,6 +14,8 @@ const FollowUp = require("../models/FollowUp");
 const ActivityLog = require("../models/ActivityLog");
 const CycleHistory = require("../models/CycleHistory");
 const AppState = require("../models/AppState");
+const CommunityMessage = require("../models/CommunityMessage");
+const CommunityPost = require("../models/CommunityPost");
 
 const dbPath = path.join(__dirname, "..", "data", "db.json");
 
@@ -47,6 +49,8 @@ async function migrate() {
     replaceCollection(Chat, db.chats || []),
     replaceCollection(Symptom, db.symptoms || []),
     replaceCollection(Appointment, db.appointments || []),
+    replaceCollection(CommunityMessage, db.communityMessages || []),
+    replaceCollection(CommunityPost, db.communityPosts || []),
     AppState.updateOne(
       { key: "default" },
       {
@@ -58,7 +62,8 @@ async function migrate() {
           symptomOptions: db.symptomOptions || [],
           insightRules: db.insightRules || [],
           appointmentSlots: db.appointmentSlots || [],
-          shopRules: db.shopRules || []
+          shopRules: db.shopRules || [],
+          entertainment: db.entertainment || []
         }
       },
       { upsert: true }

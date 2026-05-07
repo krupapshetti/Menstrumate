@@ -1,6 +1,7 @@
 const signupParams = new URLSearchParams(window.location.search);
-const signupRole = signupParams.get("role") === "doctor" ? "doctor" : "user";
+const signupRole = String(signupParams.get("role") || "user").toLowerCase() === "doctor" ? "doctor" : "user";
 const signupMessage = document.getElementById("signupMessage");
+const signupForm = document.getElementById("signupForm");
 
 function showSignupMessage(message, isError = false) {
   signupMessage.className = `notice${isError ? " error" : ""}`;
@@ -22,6 +23,12 @@ async function signupApi(path, options = {}) {
 
 function configureSignupPage() {
   const isDoctor = signupRole === "doctor";
+  const specialization = document.getElementById("specialization");
+  const clinic = document.getElementById("clinic");
+
+  document.documentElement.dataset.signupRole = signupRole;
+  signupForm.classList.toggle("doctor-signup-form", isDoctor);
+  signupForm.classList.toggle("user-signup-form", !isDoctor);
   document.getElementById("signupKicker").textContent = isDoctor ? "Doctor registration" : "User registration";
   document.getElementById("signupTitle").textContent = isDoctor ? "Create Doctor Account" : "Create User Account";
   document.getElementById("signupSubtitle").textContent = isDoctor
@@ -30,8 +37,17 @@ function configureSignupPage() {
 
   document.querySelectorAll(".doctor-only").forEach((node) => {
     node.hidden = !isDoctor;
+    node.setAttribute("aria-hidden", String(!isDoctor));
   });
-  document.getElementById("specialization").required = isDoctor;
+  specialization.required = isDoctor;
+  specialization.disabled = !isDoctor;
+  clinic.required = isDoctor;
+  clinic.disabled = !isDoctor;
+
+  if (!isDoctor) {
+    specialization.value = "";
+    clinic.value = "";
+  }
 }
 
 document.getElementById("otpBtn").addEventListener("click", async () => {
@@ -72,9 +88,9 @@ document.getElementById("signupForm").addEventListener("submit", async (event) =
         password,
         confirmPassword,
         otp: document.getElementById("otp").value.trim(),
-        specialization: document.getElementById("specialization").value,
-        specialty: document.getElementById("specialization").value,
-        clinic: document.getElementById("clinic").value.trim()
+        specialization: signupRole === "doctor" ? document.getElementById("specialization").value : "",
+        specialty: signupRole === "doctor" ? document.getElementById("specialization").value : "",
+        clinic: signupRole === "doctor" ? document.getElementById("clinic").value.trim() : ""
       })
     });
 

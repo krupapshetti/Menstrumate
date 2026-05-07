@@ -7,10 +7,15 @@ const state = {
   view: "dashboard",
   products: [],
   categories: [],
+  recommendations: [],
   cart: [],
   payment: null,
   yoga: [],
-  yogaTimers: {}
+  yogaTimers: {},
+  communityTimer: null,
+  communityRoom: localStorage.getItem("menstrumateCommunityRoom") || "General Chat",
+  ambientAudio: null,
+  notificationTimer: null
 };
 
 const navItems = [
@@ -21,6 +26,8 @@ const navItems = [
   ["diet", "AI Diet Plan"],
   ["yoga", "Yoga"],
   ["doctors", "Doctors"],
+  ["entertainment", "Entertainment"],
+  ["community", "Community"],
   ["profile", "Profile"],
   ["education", "Education"]
 ];
@@ -28,6 +35,8 @@ const navItems = [
 const hashView = window.location.hash.replace("#", "");
 if (navItems.some(([id]) => id === hashView)) {
   state.view = hashView;
+} else if (["/cart", "/checkout", "/cart.html", "/checkout.html"].includes(window.location.pathname)) {
+  state.view = "cart";
 }
 
 function api(path, options = {}) {
@@ -57,6 +66,47 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function cartStorageKey() {
+  return `menstrumateCart:${state.account?.id || "guest"}`;
+}
+
+function normalizeCartItems(items = [], products = state.products) {
+  const merged = new Map();
+  items.forEach((entry) => {
+    const productId = entry.productId || entry.id;
+    const product = products.find((item) => item.id === productId) || entry;
+    if (!productId || !product?.name) return;
+    const existing = merged.get(productId);
+    merged.set(productId, {
+      productId,
+      id: productId,
+      name: product.name,
+      price: Number(product.price) || 0,
+      image: product.image || "",
+      category: product.category || "",
+      quantity: Math.max(1, Number(entry.quantity) || 1) + (existing?.quantity || 0)
+    });
+  });
+  return [...merged.values()];
+}
+
+function saveLocalCart(items) {
+  localStorage.setItem(cartStorageKey(), JSON.stringify(normalizeCartItems(items)));
+}
+
+function getLocalCart() {
+  try {
+    return normalizeCartItems(JSON.parse(localStorage.getItem(cartStorageKey()) || "[]"));
+  } catch (err) {
+    localStorage.removeItem(cartStorageKey());
+    return [];
+  }
+}
+
+function clearLocalCart() {
+  localStorage.removeItem(cartStorageKey());
+}
+
 function setSession(token, role, account) {
   state.token = token;
   state.role = role;
@@ -66,6 +116,8 @@ function setSession(token, role, account) {
 }
 
 function logout() {
+  stopCommunityPolling();
+  stopNotificationPolling();
   state.token = null;
   state.account = null;
   localStorage.removeItem("menstrumateToken");
@@ -78,6 +130,198 @@ function showMessage(id, message, isError = false) {
   if (!box) return;
   box.className = `notice${isError ? " error" : ""}`;
   box.textContent = message;
+}
+
+function notificationStorageKey() {
+  return `menstrumateNotifications:${state.account?.id || "guest"}`;
+}
+
+function readStoredNotifications() {
+  try {
+    return JSON.parse(localStorage.getItem(notificationStorageKey()) || "[]");
+  } catch (err) {
+    localStorage.removeItem(notificationStorageKey());
+    return [];
+  }
+}
+
+function saveStoredNotifications(items) {
+  localStorage.setItem(notificationStorageKey(), JSON.stringify(items.slice(0, 40)));
+}
+
+function notificationCategory(message) {
+  const text = String(message || "").toLowerCase();
+  if (text.includes("community") || text.includes("replied") || text.includes("post")) return "Community";
+  if (text.includes("cycle") || text.includes("period") || text.includes("pain") || text.includes("ovulation")) return "Health";
+  if (text.includes("water") || text.includes("hydrate") || text.includes("stretch") || text.includes("exercise")) return "Reminder";
+  return "Wellness";
+}
+
+function notificationIcon(category) {
+  return {
+    Health: "H",
+    Wellness: "W",
+    Community: "C",
+    Reminder: "R"
+  }[category] || "N";
+}
+
+function addInAppNotification(message, category = notificationCategory(message), options = {}) {
+  const text = String(message || "").trim();
+  if (!text) return null;
+  const items = readStoredNotifications();
+  const today = new Date().toISOString().slice(0, 10);
+  const fingerprint = `${today}:${category}:${text}`;
+  if (items.some((item) => item.fingerprint === fingerprint)) return null;
+  const notification = {
+    id: `note_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    fingerprint,
+    message: text,
+    category,
+    read: false,
+    createdAt: new Date().toISOString()
+  };
+  saveStoredNotifications([notification, ...items]);
+  updateNotificationBell();
+  if (options.toast !== false) showNotificationToast(notification);
+  return notification;
+}
+
+async function refreshSmartNotifications(options = {}) {
+  if (!state.token || !state.account) return;
+  try {
+    const data = await api("/api/notifications");
+    (data.messages || []).forEach((message) => addInAppNotification(message, notificationCategory(message), options));
+  } catch (err) {
+    // Notification refresh should never block the current page.
+  }
+  addLocalReminderNotifications(options);
+  renderNotificationDropdown();
+}
+
+function addLocalReminderNotifications(options = {}) {
+  const hour = new Date().getHours();
+  if (hour >= 10 && hour <= 19) {
+    addInAppNotification("Hydration reminder: take a few sips of water.", "Reminder", options);
+  }
+  if (hour >= 15 && hour <= 21) {
+    addInAppNotification("Take a short stretch break.", "Wellness", options);
+  }
+  let moods = [];
+  try {
+    moods = JSON.parse(localStorage.getItem("menstrumateMoodHistory") || "[]");
+  } catch {
+    localStorage.removeItem("menstrumateMoodHistory");
+  }
+  const latestMood = moods[moods.length - 1];
+  if (latestMood && ["Sad", "Angry", "Tired", "Stressed"].includes(latestMood.mood)) {
+    addInAppNotification(`Mood check-in noted: ${latestMood.mood}. Try one gentle self-care action.`, "Wellness", options);
+  }
+  addInAppNotification("Check your community space for supportive replies and interactions.", "Community", { toast: false });
+}
+
+function updateNotificationBell() {
+  const count = readStoredNotifications().filter((item) => !item.read).length;
+  const badge = document.getElementById("notificationBadge");
+  if (!badge) return;
+  badge.textContent = count > 9 ? "9+" : String(count);
+  badge.hidden = count === 0;
+}
+
+function renderNotificationDropdown() {
+  const list = document.getElementById("notificationList");
+  if (!list) return;
+  const items = readStoredNotifications();
+  list.innerHTML = items.length ? items.slice(0, 10).map((item) => `
+    <article class="notification-menu-item ${item.read ? "read" : "unread"}">
+      <span class="notification-category ${escapeHtml(item.category)}">${notificationIcon(item.category)}</span>
+      <div>
+        <strong>${escapeHtml(item.category)}</strong>
+        <p>${escapeHtml(item.message)}</p>
+        <small>${new Date(item.createdAt).toLocaleString()}</small>
+      </div>
+      ${item.read ? "" : `<button class="mark-read-btn" data-read-note="${escapeHtml(item.id)}">Read</button>`}
+    </article>
+  `).join("") : `<p class="muted">No notifications yet.</p>`;
+  document.querySelectorAll("[data-read-note]").forEach((button) => {
+    button.addEventListener("click", () => markNotificationRead(button.dataset.readNote));
+  });
+  updateNotificationBell();
+}
+
+function markNotificationRead(id) {
+  const items = readStoredNotifications().map((item) => item.id === id ? { ...item, read: true } : item);
+  saveStoredNotifications(items);
+  renderNotificationDropdown();
+}
+
+function markAllNotificationsRead() {
+  saveStoredNotifications(readStoredNotifications().map((item) => ({ ...item, read: true })));
+  renderNotificationDropdown();
+}
+
+function showNotificationToast(notification) {
+  let stack = document.getElementById("toastStack");
+  if (!stack) {
+    document.body.insertAdjacentHTML("beforeend", `<div class="toast-stack" id="toastStack"></div>`);
+    stack = document.getElementById("toastStack");
+  }
+  const toastId = `toast_${notification.id}`;
+  stack.insertAdjacentHTML("beforeend", `
+    <article class="app-toast ${escapeHtml(notification.category)}" id="${toastId}">
+      <span class="notification-category ${escapeHtml(notification.category)}">${notificationIcon(notification.category)}</span>
+      <div>
+        <strong>${escapeHtml(notification.category)}</strong>
+        <p>${escapeHtml(notification.message)}</p>
+      </div>
+      <button class="toast-close" data-toast-close="${toastId}">x</button>
+    </article>
+  `);
+  const toast = document.getElementById(toastId);
+  toast.querySelector("[data-toast-close]").addEventListener("click", () => toast.remove());
+  setTimeout(() => toast?.classList.add("is-hiding"), 4600);
+  setTimeout(() => toast?.remove(), 5200);
+}
+
+function maybeShowUnreadToastOnce() {
+  const key = `menstrumateToastSeen:${state.account?.id}:${new Date().toISOString().slice(0, 10)}`;
+  if (sessionStorage.getItem(key)) return;
+  const firstUnread = readStoredNotifications().find((item) => !item.read);
+  if (!firstUnread) return;
+  sessionStorage.setItem(key, "shown");
+  showNotificationToast(firstUnread);
+}
+
+function setupNotificationBell() {
+  const bell = document.getElementById("notificationBell");
+  const menu = document.getElementById("notificationMenu");
+  if (!bell || !menu) return;
+  bell.addEventListener("click", (event) => {
+    event.stopPropagation();
+    menu.hidden = !menu.hidden;
+    renderNotificationDropdown();
+    if (!menu.hidden) {
+      setTimeout(() => {
+        document.addEventListener("click", (clickEvent) => {
+          if (!clickEvent.target.closest(".notification-hub")) menu.hidden = true;
+        }, { once: true });
+      }, 0);
+    }
+  });
+  document.getElementById("markAllRead").addEventListener("click", markAllNotificationsRead);
+  updateNotificationBell();
+}
+
+function startNotificationPolling() {
+  stopNotificationPolling();
+  state.notificationTimer = setInterval(() => {
+    refreshSmartNotifications({ toast: true });
+  }, 90000);
+}
+
+function stopNotificationPolling() {
+  if (state.notificationTimer) clearInterval(state.notificationTimer);
+  state.notificationTimer = null;
 }
 
 function renderLanding() {
@@ -234,7 +478,22 @@ async function renderApp() {
       <section class="content">
         <div class="topbar">
           <div class="section-title" id="title"></div>
-          <button class="btn secondary" id="refreshBtn">Refresh</button>
+          <div class="topbar-actions">
+            <div class="notification-hub">
+              <button class="notification-bell" id="notificationBell" aria-label="Open notifications">
+                <span aria-hidden="true">&#128276;</span>
+                <strong id="notificationBadge" hidden>0</strong>
+              </button>
+              <div class="notification-menu" id="notificationMenu" hidden>
+                <div class="notification-menu-head">
+                  <strong>Notifications</strong>
+                  <button class="mark-read-btn" id="markAllRead">Mark all read</button>
+                </div>
+                <div id="notificationList"></div>
+              </div>
+            </div>
+            <button class="btn secondary" id="refreshBtn">Refresh</button>
+          </div>
         </div>
         <div id="view"></div>
       </section>
@@ -248,11 +507,20 @@ async function renderApp() {
     });
   });
   document.getElementById("logoutBtn").addEventListener("click", logout);
-  document.getElementById("refreshBtn").addEventListener("click", () => loadView());
+  document.getElementById("refreshBtn").addEventListener("click", async () => {
+    await refreshSmartNotifications({ toast: true });
+    await loadView();
+  });
+  setupNotificationBell();
+  await refreshSmartNotifications({ toast: false });
+  maybeShowUnreadToastOnce();
+  startNotificationPolling();
   await loadView();
 }
 
 async function loadView() {
+  if (state.view !== "community") stopCommunityPolling();
+  if (state.view !== "entertainment") stopAmbientSound();
   const loaders = {
     dashboard: renderDashboard,
     symptoms: renderSymptomsLink,
@@ -261,6 +529,9 @@ async function loadView() {
     diet: renderDiet,
     yoga: renderYoga,
     doctors: renderDoctors,
+    notifications: renderNotifications,
+    entertainment: renderEntertainment,
+    community: renderCommunity,
     profile: renderProfile,
     education: renderEducation
   };
@@ -421,22 +692,33 @@ async function getProductsAndCart() {
   const [productData, cartData] = await Promise.all([api("/api/products"), api("/api/cart")]);
   state.products = productData.products;
   state.categories = productData.categories;
-  state.cart = cartData.items;
+  state.recommendations = productData.recommendations || [];
+  let backendCart = normalizeCartItems(cartData.items, state.products);
+  const localCart = normalizeCartItems(getLocalCart(), state.products);
+  if (!backendCart.length && localCart.length) {
+    for (const item of localCart) {
+      await api("/api/cart/items", {
+        method: "POST",
+        body: JSON.stringify({ productId: item.productId, quantity: item.quantity })
+      });
+    }
+    const restored = await api("/api/cart");
+    backendCart = normalizeCartItems(restored.items, state.products);
+  }
+  state.cart = backendCart;
+  saveLocalCart(state.cart);
 }
 
 async function renderShop() {
   setTitle("Shop", "Products are loaded from the backend and added to your stored cart.");
-  const [productData, cartData] = await Promise.all([api("/api/products"), api("/api/cart")]);
-  state.products = productData.products;
-  state.categories = productData.categories;
-  state.cart = cartData.items;
+  await getProductsAndCart();
   const active = sessionStorage.getItem("category") || "All";
   const products = active === "All" ? state.products : state.products.filter((product) => product.category === active);
   document.getElementById("view").innerHTML = `
-    ${productData.recommendations?.length ? `
+    ${state.recommendations?.length ? `
       <div class="panel smart-shop-panel">
         <h3>Recommended for your recent symptoms</h3>
-        <div class="symptom-badges">${productData.recommendations.map((product) => `<span>${escapeHtml(product.name)}</span>`).join("")}</div>
+        <div class="symptom-badges">${state.recommendations.map((product) => `<span>${escapeHtml(product.name)}</span>`).join("")}</div>
       </div>
     ` : ""}
     <div class="shop-tools">
@@ -471,7 +753,14 @@ async function renderShop() {
     button.addEventListener("click", async () => {
       button.classList.add("is-adding");
       button.textContent = "Added";
-      await api("/api/cart/items", { method: "POST", body: JSON.stringify({ productId: button.dataset.add, quantity: 1 }) });
+      const product = state.products.find((item) => item.id === button.dataset.add);
+      if (product) {
+        state.cart = normalizeCartItems([...state.cart, { ...product, productId: product.id, quantity: 1 }], state.products);
+        saveLocalCart(state.cart);
+      }
+      const data = await api("/api/cart/items", { method: "POST", body: JSON.stringify({ productId: button.dataset.add, quantity: 1 }) });
+      state.cart = normalizeCartItems(data.items, state.products);
+      saveLocalCart(state.cart);
       await renderShop();
     });
   });
@@ -480,7 +769,9 @@ async function renderShop() {
 async function renderCart() {
   setTitle("Cart", "Update quantities, remove items, and checkout with exact amount QR.");
   await getProductsAndCart();
-  const rows = state.cart.map((entry) => ({ ...state.products.find((product) => product.id === entry.productId), quantity: entry.quantity }));
+  const rows = normalizeCartItems(state.cart, state.products);
+  state.cart = rows;
+  saveLocalCart(state.cart);
   const total = rows.reduce((sum, item) => sum + item.price * item.quantity, 0);
   document.getElementById("view").innerHTML = `
     <section class="checkout cart-layout">
@@ -503,22 +794,27 @@ async function renderCart() {
         <h3>Total</h3>
         <strong style="font-size:32px">${money(total)}</strong>
         <button class="btn" id="checkoutBtn" ${rows.length ? "" : "disabled"} style="width:100%;margin-top:16px">Checkout</button>
-        <div id="paymentBox"></div>
+        <p class="muted">Your checkout will use these exact saved cart items.</p>
       </aside>
     </section>
+    <div id="paymentBox"></div>
   `;
   document.querySelectorAll("[data-inc], [data-dec]").forEach((button) => {
     button.addEventListener("click", async () => {
       const productId = button.dataset.inc || button.dataset.dec;
       const item = state.cart.find((entry) => entry.productId === productId);
       const quantity = item.quantity + (button.dataset.inc ? 1 : -1);
-      await api(`/api/cart/items/${productId}`, { method: "PATCH", body: JSON.stringify({ quantity }) });
+      const data = await api(`/api/cart/items/${productId}`, { method: "PATCH", body: JSON.stringify({ quantity }) });
+      state.cart = normalizeCartItems(data.items, state.products);
+      saveLocalCart(state.cart);
       await renderCart();
     });
   });
   document.querySelectorAll("[data-remove]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await api(`/api/cart/items/${button.dataset.remove}`, { method: "DELETE" });
+      const data = await api(`/api/cart/items/${button.dataset.remove}`, { method: "DELETE" });
+      state.cart = normalizeCartItems(data.items, state.products);
+      saveLocalCart(state.cart);
       await renderCart();
     });
   });
@@ -526,18 +822,44 @@ async function renderCart() {
     const data = await api("/api/checkout", { method: "POST", body: "{}" });
     state.payment = data.payment;
     document.getElementById("paymentBox").innerHTML = `
-      <hr>
-      <h3>Scan to Pay</h3>
-      <img class="qr" src="${state.payment.qrCode}" alt="Payment QR">
-      <p>Exact amount: <strong>${money(state.payment.amount)}</strong></p>
-      <button class="btn teal" id="paidBtn">I Paid</button>
+      <div class="modal-backdrop" id="paymentModal">
+        <section class="payment-modal">
+          <button class="modal-close" id="closePayment">x</button>
+          <p class="landing-kicker">Simulated QR Payment</p>
+          <h2>Scan to Pay</h2>
+          <img class="qr" src="${state.payment.qrCode}" alt="Payment QR">
+          <p>Exact amount: <strong>${money(state.payment.amount)}</strong></p>
+          <div class="checkout-items">
+            ${state.payment.items.map((item) => `<span>${escapeHtml(item.name)} x ${escapeHtml(item.quantity)}</span>`).join("")}
+          </div>
+          <div class="btn-row">
+            <button class="btn teal" id="paidBtn">I Paid</button>
+            <button class="btn secondary" id="cancelPayment">Cancel</button>
+          </div>
+          <div id="paymentMessage"></div>
+        </section>
+      </div>
     `;
+    document.getElementById("closePayment").addEventListener("click", closePaymentModal);
+    document.getElementById("cancelPayment").addEventListener("click", closePaymentModal);
     document.getElementById("paidBtn").addEventListener("click", async () => {
+      const button = document.getElementById("paidBtn");
+      button.disabled = true;
+      showMessage("paymentMessage", "Confirming payment...");
       await api(`/api/payments/${state.payment.id}/confirm`, { method: "POST", body: "{}" });
+      state.cart = [];
+      clearLocalCart();
       state.payment = null;
-      await renderCart();
+      closePaymentModal();
+      state.view = "dashboard";
+      history.replaceState(null, "", "#dashboard");
+      await renderApp();
     });
   });
+}
+
+function closePaymentModal() {
+  document.getElementById("paymentModal")?.remove();
 }
 
 async function renderDiet() {
@@ -782,17 +1104,379 @@ function closeAppointmentModal() {
 async function renderEducation() {
   setTitle("Education", "Menstruation info, health tips, and basic sex education from the API.");
   const data = await api("/api/education");
+  const groups = data.education.reduce((result, item) => {
+    result[item.topic] = [...(result[item.topic] || []), item];
+    return result;
+  }, {});
   document.getElementById("view").innerHTML = `
-    <div class="grid">
-      ${data.education.map((item) => `
-        <article class="edu-card">
-          <p class="muted">${escapeHtml(item.topic)}</p>
+    <div class="education-sections">
+      ${Object.entries(groups).map(([topic, items]) => `
+        <section class="panel education-topic">
+          <div class="section-row">
+            <h3>${escapeHtml(topic)}</h3>
+            <span class="soft-pill">${items.length} guide${items.length === 1 ? "" : "s"}</span>
+          </div>
+          <div class="grid">
+            ${items.map((item) => `
+              <article class="edu-card">
+                <h3>${escapeHtml(item.title)}</h3>
+                <p>${escapeHtml(item.body)}</p>
+              </article>
+            `).join("")}
+          </div>
+        </section>
+      `).join("")}
+    </div>
+  `;
+}
+
+async function renderNotifications() {
+  setTitle("Notifications", "Structured reminders generated from your current cycle and symptoms.");
+  const data = await api("/api/notifications");
+  document.getElementById("view").innerHTML = `
+    <section class="panel notification-center">
+      <h3>Wellness reminders</h3>
+      <div class="notification-list">
+        ${data.messages.map((message, index) => `
+          <article class="notification-item">
+            <span class="notification-dot"></span>
+            <div>
+              <strong>${index === 0 ? "Priority" : "Reminder"}</strong>
+              <p>${escapeHtml(message)}</p>
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+async function renderEntertainment() {
+  setTitle("Entertainment", "Calming tools, comfort content, and light movement for stress relief.");
+  const [data, yogaData] = await Promise.all([api("/api/entertainment"), api("/api/yoga")]);
+  const quotes = [
+    "Slow is still progress.",
+    "You can be gentle and still be strong.",
+    "Rest is a valid response to a hard day.",
+    "Your body is asking for care, not perfection."
+  ];
+  const selfCare = ["Drink water", "Stretch for two minutes", "Watch something relaxing", "Take a short walk", "Make ginger tea", "Dim your screen"];
+  const comfortContent = [
+    { type: "Playlist", title: "Soft lofi focus", body: "Low tempo beats for study stress and PMS days." },
+    { type: "Playlist", title: "Rainy evening calm", body: "Gentle rain textures and soft piano." },
+    { type: "Movie", title: "Comfort watch", body: "Pick a familiar light movie or show with low emotional load." },
+    { type: "Video", title: "Motivation reset", body: "A short guided reset or cozy routine video." }
+  ];
+  document.getElementById("view").innerHTML = `
+    <section class="panel relaxation-panel">
+      <div>
+        <p class="landing-kicker">Relaxation Mode</p>
+        <h3>Breathe with the circle</h3>
+        <p id="relaxQuote">${escapeHtml(quotes[Math.floor(Math.random() * quotes.length)])}</p>
+        <div class="btn-row">
+          <button class="btn secondary" data-sound="rain">Rain</button>
+          <button class="btn secondary" data-sound="lofi">Lofi</button>
+          <button class="btn secondary" data-sound="soft">Soft tone</button>
+          <button class="btn ghost" id="stopAmbient">Stop</button>
+        </div>
+      </div>
+      <div class="breathing-orb" aria-label="Breathing animation"><span></span></div>
+    </section>
+
+    <section class="panel suggestion-panel">
+      <div class="section-row">
+        <div>
+          <h3>Self-care suggestion</h3>
+          <p class="muted" id="selfCareText">${escapeHtml(selfCare[0])}</p>
+        </div>
+        <button class="btn" id="randomCareBtn">New Suggestion</button>
+      </div>
+      <div class="grid entertainment-grid">
+        ${data.activities.map((activity) => `
+          <article class="panel entertainment-card">
+            <p class="landing-kicker">${escapeHtml(activity.type)}</p>
+            <h3>${escapeHtml(activity.title)}</h3>
+            <p>${escapeHtml(activity.body)}</p>
+            <button class="btn secondary" data-activity="${escapeHtml(activity.id)}">Mark Done</button>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+
+    <section class="grid comfort-grid">
+      ${comfortContent.map((item) => `
+        <article class="panel comfort-card">
+          <p class="landing-kicker">${escapeHtml(item.type)}</p>
           <h3>${escapeHtml(item.title)}</h3>
           <p>${escapeHtml(item.body)}</p>
         </article>
       `).join("")}
-    </div>
+    </section>
+
+    <section class="panel exercise-preview">
+      <div class="section-row">
+        <h3>Gentle movement visuals</h3>
+        <span class="soft-pill">${yogaData.yoga.length} guided options</span>
+      </div>
+      <div class="grid entertainment-grid">
+        ${yogaData.yoga.slice(0, 4).map((pose) => `
+          <article class="exercise-mini-card">
+            <img src="${pose.image}" alt="${escapeHtml(pose.name)}">
+            <div>
+              <strong>${escapeHtml(pose.name)}</strong>
+              <p>${escapeHtml(pose.instructions)}</p>
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    </section>
   `;
+  document.getElementById("randomCareBtn").addEventListener("click", () => {
+    document.getElementById("selfCareText").textContent = selfCare[Math.floor(Math.random() * selfCare.length)];
+    document.getElementById("relaxQuote").textContent = quotes[Math.floor(Math.random() * quotes.length)];
+  });
+  document.querySelectorAll("[data-sound]").forEach((button) => {
+    button.addEventListener("click", () => startAmbientSound(button.dataset.sound));
+  });
+  document.getElementById("stopAmbient").addEventListener("click", stopAmbientSound);
+  document.querySelectorAll("[data-activity]").forEach((button) => {
+    button.addEventListener("click", () => {
+      button.textContent = "Done";
+      button.disabled = true;
+      button.closest(".entertainment-card")?.classList.add("is-complete");
+    });
+  });
+}
+
+function startAmbientSound(kind) {
+  stopAmbientSound();
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+  const context = new AudioContext();
+  const gain = context.createGain();
+  const oscillator = context.createOscillator();
+  const frequencies = { rain: 180, lofi: 130, soft: 220 };
+  oscillator.type = kind === "rain" ? "sine" : "triangle";
+  oscillator.frequency.value = frequencies[kind] || 160;
+  gain.gain.value = 0.025;
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start();
+  state.ambientAudio = { context, oscillator };
+}
+
+function stopAmbientSound() {
+  if (!state.ambientAudio) return;
+  state.ambientAudio.oscillator.stop();
+  state.ambientAudio.context.close();
+  state.ambientAudio = null;
+}
+
+async function renderCommunity() {
+  setTitle("Community", "Anonymous support posts, mood check-ins, and live rooms.");
+  const moodOptions = ["Happy", "Sad", "Angry", "Tired", "Stressed"];
+  const rooms = ["PMS Support", "PCOS Support", "Study Stress", "General Chat"];
+  if (!rooms.includes(state.communityRoom)) state.communityRoom = "General Chat";
+  const stats = [
+    "120 users tracked cramps today",
+    "87 users feeling stressed",
+    "43 users chose rest today",
+    "64 users shared support this week"
+  ];
+  document.getElementById("view").innerHTML = `
+    <section class="community-page">
+      <div class="community-main">
+        <section class="panel community-post-composer">
+          <p class="landing-kicker">Anonymous post</p>
+          <form id="communityPostForm">
+            <textarea id="communityPostInput" placeholder="Share what you are feeling. Your name will stay anonymous." maxlength="800" required></textarea>
+            <div class="btn-row">
+              <select id="postMood">
+                <option value="">Mood tag</option>
+                ${moodOptions.map((mood) => `<option>${mood}</option>`).join("")}
+              </select>
+              <button class="btn">Post anonymously</button>
+            </div>
+          </form>
+          <div id="communityPostNotice"></div>
+        </section>
+
+        <section class="community-feed" id="communityFeed"></section>
+      </div>
+
+      <aside class="community-side">
+        <section class="panel mood-panel">
+          <h3>Daily mood check-in</h3>
+          <div class="mood-picker">
+            ${moodOptions.map((mood) => `<button class="mood-btn" data-mood="${mood}">${mood}</button>`).join("")}
+          </div>
+          <div id="moodSummary"></div>
+        </section>
+
+        <section class="panel alone-panel">
+          <h3>You're not alone</h3>
+          <div class="support-stats">${stats.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
+        </section>
+
+        <section class="panel community-room">
+          <div class="room-tabs">
+            ${rooms.map((room) => `<button class="room-tab ${room === state.communityRoom ? "active" : ""}" data-room="${escapeHtml(room)}">${escapeHtml(room)}</button>`).join("")}
+          </div>
+          <div class="community-messages" id="communityMessages"></div>
+          <form id="communityForm" class="community-form">
+            <input id="communityInput" placeholder="Message ${escapeHtml(state.communityRoom)}..." maxlength="500" required>
+            <button class="btn">Send</button>
+          </form>
+          <div id="communityNotice"></div>
+        </section>
+      </aside>
+    </section>
+  `;
+  document.getElementById("communityPostForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = document.getElementById("communityPostInput");
+    try {
+      await api("/api/community/posts", {
+        method: "POST",
+        body: JSON.stringify({ body: input.value, mood: document.getElementById("postMood").value })
+      });
+      input.value = "";
+      await loadCommunityPosts();
+    } catch (err) {
+      showMessage("communityPostNotice", err.message, true);
+    }
+  });
+  document.querySelectorAll("[data-mood]").forEach((button) => {
+    button.addEventListener("click", () => saveMood(button.dataset.mood));
+  });
+  document.querySelectorAll("[data-room]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.communityRoom = button.dataset.room;
+      localStorage.setItem("menstrumateCommunityRoom", state.communityRoom);
+      document.querySelectorAll("[data-room]").forEach((node) => node.classList.toggle("active", node.dataset.room === state.communityRoom));
+      document.getElementById("communityInput").placeholder = `Message ${state.communityRoom}...`;
+      await loadCommunityMessages();
+    });
+  });
+  document.getElementById("communityForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = document.getElementById("communityInput");
+    try {
+      await api("/api/community/messages", {
+        method: "POST",
+        body: JSON.stringify({ message: input.value, room: state.communityRoom })
+      });
+      input.value = "";
+      await loadCommunityMessages();
+    } catch (err) {
+      showMessage("communityNotice", err.message, true);
+    }
+  });
+  renderMoodSummary();
+  await loadCommunityPosts();
+  await loadCommunityMessages();
+  startCommunityPolling();
+}
+
+async function loadCommunityPosts() {
+  const data = await api("/api/community/posts");
+  const feed = document.getElementById("communityFeed");
+  if (!feed) return;
+  feed.innerHTML = data.posts.length ? data.posts.map((post) => `
+    <article class="panel community-post-card" data-post-card="${escapeHtml(post.id)}">
+      <div class="post-topline">
+        <strong>${escapeHtml(post.anonymousName)}</strong>
+        <span>${post.mood ? escapeHtml(post.mood) : "Sharing"}</span>
+      </div>
+      <p>${escapeHtml(post.body)}</p>
+      <small>${new Date(post.createdAt).toLocaleString()}</small>
+      <div class="post-actions">
+        <button class="btn secondary" data-react-post="${escapeHtml(post.id)}">&#10084; ${post.reacted ? "Loved" : "Like"} (${post.reactionCount})</button>
+      </div>
+      <div class="post-comments">
+        ${post.comments.map((comment) => `
+          <div class="post-comment">
+            <strong>${escapeHtml(comment.anonymousName)}</strong>
+            <span>${escapeHtml(comment.body)}</span>
+          </div>
+        `).join("")}
+      </div>
+      <form class="comment-form" data-comment-form="${escapeHtml(post.id)}">
+        <input placeholder="Reply anonymously..." maxlength="500" required>
+        <button class="btn ghost">Reply</button>
+      </form>
+    </article>
+  `).join("") : `<section class="panel"><p class="muted">No posts yet. Share anonymously to start the feed.</p></section>`;
+  document.querySelectorAll("[data-react-post]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api(`/api/community/posts/${button.dataset.reactPost}/react`, { method: "POST", body: "{}" });
+      addInAppNotification("Community reaction updated.", "Community", { toast: true });
+      await loadCommunityPosts();
+    });
+  });
+  document.querySelectorAll("[data-comment-form]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = form.querySelector("input");
+      await api(`/api/community/posts/${form.dataset.commentForm}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body: input.value })
+      });
+      addInAppNotification("Someone replied to a community post.", "Community", { toast: true });
+      await loadCommunityPosts();
+    });
+  });
+}
+
+function saveMood(mood) {
+  const today = new Date().toISOString().slice(0, 10);
+  const history = JSON.parse(localStorage.getItem("menstrumateMoodHistory") || "[]").filter((entry) => entry.date !== today);
+  history.push({ date: today, mood });
+  localStorage.setItem("menstrumateMoodHistory", JSON.stringify(history.slice(-14)));
+  renderMoodSummary();
+  addInAppNotification(`Mood check-in saved: ${mood}. A gentle wellness reminder is ready for you.`, "Wellness", { toast: true });
+}
+
+function renderMoodSummary() {
+  const box = document.getElementById("moodSummary");
+  if (!box) return;
+  const history = JSON.parse(localStorage.getItem("menstrumateMoodHistory") || "[]");
+  const counts = history.reduce((result, entry) => {
+    result[entry.mood] = (result[entry.mood] || 0) + 1;
+    return result;
+  }, {});
+  box.innerHTML = history.length ? `
+    <p class="muted">Last ${history.length} check-in${history.length === 1 ? "" : "s"}</p>
+    <div class="mood-bars">
+      ${Object.entries(counts).map(([mood, count]) => `<span style="height:${Math.max(18, count * 18)}px" title="${escapeHtml(mood)}">${escapeHtml(mood.slice(0, 1))}</span>`).join("")}
+    </div>
+  ` : `<p class="muted">Choose a mood to start your trend.</p>`;
+}
+
+async function loadCommunityMessages() {
+  const data = await api(`/api/community/messages?room=${encodeURIComponent(state.communityRoom)}`);
+  const box = document.getElementById("communityMessages");
+  if (!box) return;
+  box.innerHTML = data.messages.length ? data.messages.map((message) => `
+    <article class="community-message ${message.userId === state.account.id ? "mine" : ""}">
+      <strong>${escapeHtml(message.name)} <span>${escapeHtml(message.role)}</span></strong>
+      <p>${escapeHtml(message.message)}</p>
+      <small>${new Date(message.createdAt).toLocaleString()}</small>
+    </article>
+  `).join("") : `<p class="muted">No messages yet. Start the room with a kind note.</p>`;
+  box.scrollTop = box.scrollHeight;
+}
+
+function startCommunityPolling() {
+  stopCommunityPolling();
+  state.communityTimer = setInterval(() => {
+    if (state.view === "community") loadCommunityMessages().catch(() => {});
+  }, 5000);
+}
+
+function stopCommunityPolling() {
+  if (state.communityTimer) clearInterval(state.communityTimer);
+  state.communityTimer = null;
 }
 
 async function renderProfile() {

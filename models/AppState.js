@@ -9,7 +9,8 @@ const appStateSchema = new mongoose.Schema({
   symptomOptions: [String],
   insightRules: [mongoose.Schema.Types.Mixed],
   appointmentSlots: [String],
-  shopRules: [mongoose.Schema.Types.Mixed]
+  shopRules: [mongoose.Schema.Types.Mixed],
+  entertainment: [mongoose.Schema.Types.Mixed]
 }, { minimize: false });
 
 module.exports = mongoose.model("AppState", appStateSchema);
