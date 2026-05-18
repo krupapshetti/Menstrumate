@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Doctor Signup | Menstrumate</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="auth-wrap page">
+    <section class="auth-card doctor-signup-card">
+      <a class="back-link" href="/select-role.html">Back</a>
+      <p class="landing-kicker">Doctor registration</p>
+      <h1>Create Doctor Account</h1>
+      <p class="muted">Register your profile so patients can find you, chat, and schedule appointments.</p>
+
+      <form id="doctorSignupForm" class="form-grid">
+        <label class="field">
+          <span>Name</span>
+          <input id="doctorName" autocomplete="name" required>
+        </label>
+
+        <label class="field">
+          <span>Email</span>
+          <input id="doctorEmail" type="email" autocomplete="email" required>
+        </label>
+
+        <label class="field">
+          <span>Password</span>
+          <input id="doctorPassword" type="password" minlength="6" autocomplete="new-password" required>
+        </label>
+
+        <label class="field">
+          <span>Confirm Password</span>
+          <input id="doctorConfirmPassword" type="password" minlength="6" autocomplete="new-password" required>
+        </label>
+
+        <label class="field">
+          <span>Specialization</span>
+          <select id="doctorSpecialization" required>
+            <option value="">Select specialization</option>
+            <option>Gynecologist</option>
+            <option>General Physician</option>
+            <option>Reproductive Health Specialist</option>
+            <option>Nutrition Specialist</option>
+            <option>Mental Wellness Counselor</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Experience</span>
+          <input id="doctorExperience" placeholder="Example: 8 years">
+        </label>
+
+        <label class="field full">
+          <span>Clinic/Hospital Name</span>
+          <input id="doctorClinic" placeholder="Optional">
+        </label>
+
+        <label class="field">
+          <span>OTP</span>
+          <input id="doctorOtp" placeholder="Generate OTP first" required>
+        </label>
+
+        <div class="field btn-row">
+          <span>&nbsp;</span>
+          <button class="btn secondary" type="button" id="doctorOtpBtn">Generate OTP</button>
+          <button class="btn" type="submit">Create Doctor Account</button>
+        </div>
+      </form>
+
+      <div id="doctorSignupMessage"></div>
+    </section>
+  </main>
+  <script src="/doctor-signup.js"></script>
+</body>
+</html>
